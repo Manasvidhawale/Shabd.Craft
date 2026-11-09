@@ -1,0 +1,126 @@
+{
+  "builtin_templates": [
+    {
+      "name": "Customer Feedback Summarizer",
+      "description": "Summarize customer feedback into structured key points with sentiment analysis.",
+      "category": "summarization",
+      "system_prompt": "You are a customer experience analyst. Summarize feedback concisely, identifying key issues and overall sentiment.",
+      "user_prompt_template": "Summarize the following customer feedback in 2-3 sentences. Identify the main issues and overall sentiment.\n\nFeedback: {{customer_feedback}}",
+      "variables": ["customer_feedback"],
+      "technique": "role_based",
+      "output_format": "text",
+      "example_input": "The product works great but the support team took 3 days to respond to my urgent request.",
+      "example_output": "The customer is satisfied with the product quality but frustrated with slow support response times (3-day wait for urgent request). Overall sentiment: Mixed, leaning negative due to support experience.",
+      "eval_criteria": {"accuracy": 0.25, "relevance": 0.25, "instruction_adherence": 0.2, "clarity": 0.15, "format_compliance": 0.15}
+    },
+    {
+      "name": "Entity Extractor",
+      "description": "Extract named entities and key information from text into structured JSON.",
+      "category": "extraction",
+      "system_prompt": "You are a data extraction specialist. Extract structured information and return valid JSON only.",
+      "user_prompt_template": "Extract all named entities (persons, organizations, locations, dates, monetary values) from the following text. Return valid JSON with arrays for each entity type.\n\nText: {{input_text}}",
+      "variables": ["input_text"],
+      "technique": "structured_output",
+      "output_format": "json",
+      "example_input": "On March 15, 2024, Google CEO Sundar Pichai announced a $2 billion investment in a new data center in Berlin, Germany.",
+      "example_output": "{\"persons\": [\"Sundar Pichai\"], \"organizations\": [\"Google\"], \"locations\": [\"Berlin\", \"Germany\"], \"dates\": [\"March 15, 2024\"], \"monetary_values\": [\"$2 billion\"]}",
+      "eval_criteria": {"accuracy": 0.3, "relevance": 0.2, "instruction_adherence": 0.2, "clarity": 0.1, "format_compliance": 0.2}
+    },
+    {
+      "name": "Sentiment Classifier",
+      "description": "Classify text sentiment as positive, negative, or neutral with confidence score.",
+      "category": "sentiment",
+      "system_prompt": "You are a sentiment analysis expert. Classify text sentiment accurately.",
+      "user_prompt_template": "Classify the sentiment of the following text as 'positive', 'negative', or 'neutral'. Provide a brief explanation.\n\nText: {{input_text}}",
+      "variables": ["input_text"],
+      "technique": "zero_shot",
+      "output_format": "text",
+      "example_input": "I absolutely love this new feature! It makes my work so much easier.",
+      "example_output": "Sentiment: positive\nExplanation: The text expresses strong enthusiasm ('absolutely love') and practical satisfaction ('makes my work easier').",
+      "eval_criteria": {"accuracy": 0.35, "relevance": 0.2, "instruction_adherence": 0.2, "clarity": 0.15, "format_compliance": 0.1}
+    },
+    {
+      "name": "Q&A with Context",
+      "description": "Answer questions based on provided context, citing relevant information.",
+      "category": "question_answering",
+      "system_prompt": "You are a helpful assistant. Answer questions based only on the provided context. If the answer is not in the context, say so.",
+      "user_prompt_template": "Context:\n{{context}}\n\nQuestion: {{question}}\n\nAnswer based only on the context above:",
+      "variables": ["context", "question"],
+      "technique": "zero_shot",
+      "output_format": "text",
+      "example_input": "Context: The company was founded in 2015 by Jane Smith. It has 500 employees and is headquartered in Austin, Texas.\nQuestion: When was the company founded?",
+      "example_output": "The company was founded in 2015 by Jane Smith.",
+      "eval_criteria": {"accuracy": 0.35, "relevance": 0.25, "instruction_adherence": 0.2, "clarity": 0.1, "format_compliance": 0.1}
+    },
+    {
+      "name": "Professional Email Writer",
+      "description": "Generate professional emails based on key points and context.",
+      "category": "email_generation",
+      "system_prompt": "You are a professional business communication expert. Write clear, concise, and appropriate emails.",
+      "user_prompt_template": "Write a professional email with the following details:\n\nPurpose: {{purpose}}\nRecipient: {{recipient}}\nKey Points: {{key_points}}\nTone: {{tone}}",
+      "variables": ["purpose", "recipient", "key_points", "tone"],
+      "technique": "role_based",
+      "output_format": "text",
+      "example_input": "Purpose: Follow up on project proposal\nRecipient: Client\nKey Points: Thank for meeting, summary of proposal, next steps\nTone: Professional and warm",
+      "example_output": "Subject: Following Up on Our Project Proposal Discussion\n\nDear [Client Name],\n\nThank you for taking the time to meet with us yesterday...",
+      "eval_criteria": {"accuracy": 0.15, "relevance": 0.2, "instruction_adherence": 0.25, "clarity": 0.25, "format_compliance": 0.15}
+    },
+    {
+      "name": "Text Classifier",
+      "description": "Classify text into predefined categories using few-shot examples.",
+      "category": "classification",
+      "system_prompt": "You are a text classification system. Classify inputs into the correct category.",
+      "user_prompt_template": "Classify the following text into one of these categories: [Bug Report, Feature Request, General Inquiry, Complaint, Praise]\n\nText: {{input_text}}\n\nCategory:",
+      "variables": ["input_text"],
+      "technique": "few_shot",
+      "few_shot_examples": [
+        {"input_text": "The app crashes when I click export", "output_text": "Bug Report"},
+        {"input_text": "Can you add dark mode?", "output_text": "Feature Request"},
+        {"input_text": "What are your business hours?", "output_text": "General Inquiry"}
+      ],
+      "output_format": "text",
+      "example_input": "Your product is the worst I've ever used. Nothing works properly.",
+      "example_output": "Complaint",
+      "eval_criteria": {"accuracy": 0.4, "relevance": 0.2, "instruction_adherence": 0.2, "clarity": 0.1, "format_compliance": 0.1}
+    },
+    {
+      "name": "JSON Data Generator",
+      "description": "Generate structured JSON data from natural language descriptions.",
+      "category": "json_generation",
+      "system_prompt": "You are a data structuring assistant. Convert natural language descriptions into well-formatted JSON. Always return valid JSON only.",
+      "user_prompt_template": "Convert the following information into a structured JSON object with appropriate keys and values:\n\n{{description}}\n\nReturn valid JSON only.",
+      "variables": ["description"],
+      "technique": "structured_output",
+      "output_format": "json",
+      "example_input": "John Smith, 35 years old, software engineer at Google, lives in San Francisco, has 2 children",
+      "example_output": "{\"name\": \"John Smith\", \"age\": 35, \"occupation\": \"software engineer\", \"company\": \"Google\", \"city\": \"San Francisco\", \"children\": 2}",
+      "eval_criteria": {"accuracy": 0.25, "relevance": 0.15, "instruction_adherence": 0.2, "clarity": 0.1, "format_compliance": 0.3}
+    },
+    {
+      "name": "Customer Support Response",
+      "description": "Generate empathetic, solution-oriented customer support responses.",
+      "category": "customer_support",
+      "system_prompt": "You are a senior customer support representative. Respond with empathy, acknowledge the issue, provide a clear solution or next steps, and maintain a professional, friendly tone.",
+      "user_prompt_template": "Write a customer support response to the following message:\n\nCustomer: {{customer_message}}\n\nProvide an empathetic, solution-oriented response.",
+      "variables": ["customer_message"],
+      "technique": "role_based",
+      "output_format": "text",
+      "example_input": "I've been charged twice for my subscription this month. This is the third time it's happened!",
+      "example_output": "I sincerely apologize for the duplicate charge — I completely understand how frustrating this must be, especially since it's happened before. I've flagged your account for an immediate refund of the extra charge, which should appear within 3-5 business days...",
+      "eval_criteria": {"accuracy": 0.15, "relevance": 0.2, "instruction_adherence": 0.25, "clarity": 0.25, "format_compliance": 0.15}
+    },
+    {
+      "name": "Data Analysis Assistant",
+      "description": "Analyze data descriptions and provide structured insights using task decomposition.",
+      "category": "data_analysis",
+      "system_prompt": "You are a data analyst. Break down analysis tasks into clear steps and provide actionable insights.",
+      "user_prompt_template": "Analyze the following data description step by step:\n\nStep 1: Identify the key metrics mentioned.\nStep 2: Note any trends or patterns.\nStep 3: Highlight anomalies or concerns.\nStep 4: Provide 2-3 actionable recommendations.\n\nData: {{data_description}}",
+      "variables": ["data_description"],
+      "technique": "task_decomposition",
+      "output_format": "text",
+      "example_input": "Q3 revenue was $2.1M (up 15% QoQ), but customer churn increased from 3% to 7%. New user acquisition is down 20%. Support tickets doubled.",
+      "example_output": "Step 1 — Key Metrics: Revenue $2.1M (+15% QoQ), Churn 7% (up from 3%), New acquisitions -20%, Support tickets +100%\n\nStep 2 — Trends: Revenue growing but sustainability threatened by rising churn and declining acquisition...",
+      "eval_criteria": {"accuracy": 0.25, "relevance": 0.2, "instruction_adherence": 0.25, "clarity": 0.2, "format_compliance": 0.1}
+    }
+  ]
+}

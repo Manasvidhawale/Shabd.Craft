@@ -1,0 +1,24 @@
+{
+  "test_cases": [
+    {
+      "input_data": "I've been using your product for 3 months now. The quality is excellent and it has significantly improved my workflow. However, the customer support response time is terrible - I waited 5 days for a simple question. Also, the mobile app crashes frequently.",
+      "expected_output": "Summary: Customer praises product quality and workflow improvement but criticizes slow support response (5-day wait) and frequent mobile app crashes."
+    },
+    {
+      "input_data": "The new update completely broke the export feature. I can't download any reports anymore. This is unacceptable for a paid product. I need this fixed immediately as it's affecting my business operations.",
+      "expected_output": "Summary: Critical bug report - export/download functionality broken after update, impacting business operations. Customer demands immediate fix."
+    },
+    {
+      "input_data": "Just wanted to say your team did an amazing job with the latest release! The new dashboard is intuitive, the analytics are spot-on, and the onboarding tutorial made everything easy to understand.",
+      "expected_output": "Summary: Positive feedback praising the latest release, specifically the dashboard design, analytics accuracy, and effective onboarding tutorial."
+    },
+    {
+      "input_data": "The pricing seems fair for what you get. I compared it with three competitors and yours offers the best value. My only concern is the lack of an annual billing option - monthly payments add up and feel more expensive.",
+      "expected_output": "Summary: Customer finds pricing competitive vs. alternatives but requests annual billing option to reduce perceived cost burden."
+    },
+    {
+      "input_data": "I signed up yesterday and I'm already confused. The interface has too many options and I don't know where to start. There's no getting started guide and the documentation is outdated. Considering cancelling.",
+      "expected_output": "Summary: New user struggling with complex interface, requesting better onboarding guidance and updated documentation. At risk of churn."
+    }
+  ]
+}
