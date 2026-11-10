@@ -114,3 +114,42 @@ class TestPromptEngine:
         )
         _, user = construct_prompt(version)
         assert "JSON" in user
+
+    def test_construct_prompt_chain_of_thought(self):
+        version = PromptVersion(
+            experiment_id="test",
+            user_prompt_template="Solve: {{input}}",
+            technique=PromptingTechnique.CHAIN_OF_THOUGHT,
+        )
+        _, user = construct_prompt(version, input_data="2 + 2 * 3")
+        assert "2 + 2 * 3" in user
+        assert "step by step" in user.lower()
+
+    def test_construct_prompt_chain_of_thought_no_duplicate(self):
+        version = PromptVersion(
+            experiment_id="test",
+            user_prompt_template="Solve step by step: {{input}}",
+            technique=PromptingTechnique.CHAIN_OF_THOUGHT,
+        )
+        _, user = construct_prompt(version, input_data="x=5")
+        assert user.lower().count("step by step") == 1
+
+    def test_construct_prompt_task_decomposition_adds_scaffold(self):
+        version = PromptVersion(
+            experiment_id="test",
+            user_prompt_template="Analyze: {{input}}",
+            technique=PromptingTechnique.TASK_DECOMPOSITION,
+        )
+        _, user = construct_prompt(version, input_data="sales data")
+        assert "Step 1:" in user
+        assert "Analyze: sales data" in user
+
+    def test_construct_prompt_task_decomposition_preserves_existing_steps(self):
+        version = PromptVersion(
+            experiment_id="test",
+            user_prompt_template="Step 1: Read.\nStep 2: Summarize {{input}}",
+            technique=PromptingTechnique.TASK_DECOMPOSITION,
+        )
+        _, user = construct_prompt(version, input_data="report")
+        assert not user.startswith("Complete this task sequentially")
+        assert "Step 1: Read." in user

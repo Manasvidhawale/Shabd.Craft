@@ -215,9 +215,13 @@ with right_col:
             issues.append("No template variables — prompt will be static.")
         if fmt == "json" and "json" not in user_prompt.lower():
             issues.append("JSON output selected but not mentioned in prompt.")
+        if tech == "role_based" and (not system_prompt.strip() or system_prompt.strip().lower() == "you are a helpful assistant."):
+            issues.append("Role-based selected with a generic or empty system prompt — define a specific expert role and domain.")
+        if tech == "structured_output" and not any(kw in user_prompt.lower() for kw in ["json", "field", "schema", "format", "key", "column"]):
+            issues.append("Structured output selected — specify the expected fields or output schema in the prompt.")
         if not any(kw in user_prompt.lower() for kw in ["step", "1.", "first", "then", "finally"]):
             if tech == "task_decomposition":
-                issues.append("Task decomposition selected but no steps in prompt.")
+                issues.append("No explicit steps detected — a default 3-step decomposition scaffold will be prepended automatically.")
 
         if issues:
             for issue in issues:

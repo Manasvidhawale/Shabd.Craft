@@ -52,7 +52,7 @@ class TestTaskCategoryEnum:
 class TestPromptingTechniqueEnum:
     def test_all_techniques_exist(self):
         expected = ["zero_shot", "one_shot", "few_shot", "role_based",
-                    "structured_output", "task_decomposition"]
+                    "structured_output", "task_decomposition", "chain_of_thought"]
         for val in expected:
             assert PromptingTechnique(val)
 
