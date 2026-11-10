@@ -35,7 +35,13 @@ if not experiments:
     st.stop()
 
 exp_opts = {e["id"]: e["name"] for e in experiments}
-sel_exp = st.selectbox("Experiment", list(exp_opts.keys()), format_func=lambda x: exp_opts[x])
+default_exp = st.session_state.get("current_experiment_id", experiments[0]["id"])
+if default_exp not in exp_opts:
+    default_exp = experiments[0]["id"]
+sel_exp = st.selectbox("Experiment", list(exp_opts.keys()),
+                       format_func=lambda x: exp_opts[x],
+                       index=list(exp_opts.keys()).index(default_exp))
+st.session_state["current_experiment_id"] = sel_exp
 
 versions = db.get_prompt_versions(sel_exp)
 if len(versions) < 2:

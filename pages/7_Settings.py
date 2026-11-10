@@ -57,7 +57,7 @@ with tab_config:
         else:
             st.markdown(f"- `{model}`")
 
-    st.caption("Change the default model by setting `SHABDCRAFT_DEFAULT_MODEL` in your .env file.")
+    st.caption("Change the startup default model by setting `SHABDCRAFT_DEFAULT_MODEL` in your .env file. In Live Mode, you can also pick any model per run directly from the Model dropdown in the Prompt Workshop.")
 
     st.divider()
 

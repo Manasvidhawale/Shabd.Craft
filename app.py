@@ -359,6 +359,31 @@ with col_c:
     if st.button("Settings", use_container_width=True):
         st.switch_page("pages/7_Settings.py")
 
+st.markdown("""
+<div style="display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin:1rem 0 0.5rem;">
+    <div style="background:var(--bg-card);border:1px solid var(--border-color);border-radius:8px;padding:10px 14px;">
+        <div style="font-size:0.68rem;font-weight:600;color:var(--accent-violet);letter-spacing:0.06em;">STEP 1</div>
+        <div style="font-size:0.88rem;font-weight:600;color:var(--text-primary);margin-top:2px;">Prompt Workshop</div>
+        <div style="font-size:0.75rem;color:var(--text-secondary);">Craft and test prompt templates</div>
+    </div>
+    <div style="background:var(--bg-card);border:1px solid var(--border-color);border-radius:8px;padding:10px 14px;">
+        <div style="font-size:0.68rem;font-weight:600;color:var(--accent-violet);letter-spacing:0.06em;">STEP 2</div>
+        <div style="font-size:0.88rem;font-weight:600;color:var(--text-primary);margin-top:2px;">Evaluation Lab</div>
+        <div style="font-size:0.75rem;color:var(--text-secondary);">Run datasets and security checks</div>
+    </div>
+    <div style="background:var(--bg-card);border:1px solid var(--border-color);border-radius:8px;padding:10px 14px;">
+        <div style="font-size:0.68rem;font-weight:600;color:var(--accent-violet);letter-spacing:0.06em;">STEP 3</div>
+        <div style="font-size:0.88rem;font-weight:600;color:var(--text-primary);margin-top:2px;">Prompt Optimizer</div>
+        <div style="font-size:0.75rem;color:var(--text-secondary);">Generate and test candidates</div>
+    </div>
+    <div style="background:var(--bg-card);border:1px solid var(--border-color);border-radius:8px;padding:10px 14px;">
+        <div style="font-size:0.68rem;font-weight:600;color:var(--accent-violet);letter-spacing:0.06em;">STEP 4</div>
+        <div style="font-size:0.88rem;font-weight:600;color:var(--text-primary);margin-top:2px;">Compare Versions</div>
+        <div style="font-size:0.75rem;color:var(--text-secondary);">Review diffs and pick winner</div>
+    </div>
+</div>
+""", unsafe_allow_html=True)
+
 st.markdown("")
 
 # Dashboard Metrics
