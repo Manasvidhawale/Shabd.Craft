@@ -14,7 +14,9 @@ import pandas as pd
 import plotly.graph_objects as go
 from src.config import settings
 from src.database import Database
-from src.comparison_engine import compare_versions, get_side_by_side_outputs
+from src.comparison_engine import (
+    compare_versions, get_side_by_side_outputs, build_word_diff_html,
+)
 
 st.set_page_config(page_title="Compare Versions — Shabd.Craft", page_icon="✦", layout="wide")
 
@@ -67,25 +69,47 @@ vb_data = db.get_prompt_version(ver_b)
 
 st.divider()
 
-# ── A. Side-by-Side Prompt Text ────────────────────────────────────────
+# ── A. Side-by-Side & Word-Level Diff ──────────────────────────────────
 st.markdown("##### Prompt Comparison")
 
-pa, pb = st.columns(2)
-with pa:
-    st.markdown(f"**{ver_opts[ver_a]}**")
-    if va_data.get("system_prompt"):
-        st.caption("System:")
-        st.code(va_data["system_prompt"], language="text")
-    st.caption("User Prompt:")
-    st.code(va_data["user_prompt_template"], language="text")
+tab_diff, tab_side = st.tabs(["Inline Diff (A -> B)", "Side-by-Side"])
 
-with pb:
-    st.markdown(f"**{ver_opts[ver_b]}**")
-    if vb_data.get("system_prompt"):
-        st.caption("System:")
-        st.code(vb_data["system_prompt"], language="text")
-    st.caption("User Prompt:")
-    st.code(vb_data["user_prompt_template"], language="text")
+with tab_diff:
+    st.caption("Red strikethrough = removed from Version A | Green highlight = added in Version B")
+    sys_a = va_data.get("system_prompt", "") or ""
+    sys_b = vb_data.get("system_prompt", "") or ""
+    if sys_a or sys_b:
+        st.markdown("**System Prompt Diff:**")
+        if sys_a == sys_b:
+            st.caption("No changes in system prompt.")
+        else:
+            st.markdown(build_word_diff_html(sys_a, sys_b), unsafe_allow_html=True)
+
+    st.markdown("**User Prompt Diff:**")
+    usr_a = va_data.get("user_prompt_template", "") or ""
+    usr_b = vb_data.get("user_prompt_template", "") or ""
+    if usr_a == usr_b:
+        st.caption("No changes in user prompt template.")
+    else:
+        st.markdown(build_word_diff_html(usr_a, usr_b), unsafe_allow_html=True)
+
+with tab_side:
+    pa, pb = st.columns(2)
+    with pa:
+        st.markdown(f"**{ver_opts[ver_a]}**")
+        if va_data.get("system_prompt"):
+            st.caption("System:")
+            st.code(va_data["system_prompt"], language="text")
+        st.caption("User Prompt:")
+        st.code(va_data["user_prompt_template"], language="text")
+
+    with pb:
+        st.markdown(f"**{ver_opts[ver_b]}**")
+        if vb_data.get("system_prompt"):
+            st.caption("System:")
+            st.code(vb_data["system_prompt"], language="text")
+        st.caption("User Prompt:")
+        st.code(vb_data["user_prompt_template"], language="text")
 
 # ── Get results ────────────────────────────────────────────────────────
 results_a = db.get_evaluation_results(sel_exp, ver_a)
