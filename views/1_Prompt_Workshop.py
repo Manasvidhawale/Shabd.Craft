@@ -67,44 +67,56 @@ with bar2:
                            index=cat_idx)
     st.session_state["ws_category"] = category
 with bar3:
-    model = st.selectbox("Model", settings.AVAILABLE_MODELS if not settings.is_demo_mode else ["demo-simulator"],
-                         index=0)
+    default_model_idx = settings.AVAILABLE_MODELS.index(settings.default_model) if settings.default_model in settings.AVAILABLE_MODELS else 0
+    model = st.selectbox("Model", settings.AVAILABLE_MODELS, index=default_model_idx)
 
 # ── Main Layout: Composer + Preview ────────────────────────────────────
-left_col, right_col = st.columns([3, 2])
+left_col, right_col = st.columns([3, 2], gap="large")
 
 with left_col:
-    # Technique selector
-    st.markdown("##### Prompting Technique")
+    # Technique + Output format side by side
     techniques = [e.value for e in PromptingTechnique]
     technique_labels = {t.value: TECHNIQUE_INFO[t]["name"] for t in PromptingTechnique}
-    tech = st.selectbox("Select Technique", techniques,
-                       format_func=lambda x: technique_labels.get(x, x),
-                       index=techniques.index(st.session_state["ws_technique"]),
-                       label_visibility="collapsed",
-                       key="sel_technique")
-    st.session_state["ws_technique"] = tech
+    formats = [e.value for e in OutputFormat]
 
-    # Technique info
+    cfg_c1, cfg_c2 = st.columns(2)
+    with cfg_c1:
+        tech = st.selectbox(
+            "Prompting Technique",
+            techniques,
+            format_func=lambda x: technique_labels.get(x, x),
+            index=techniques.index(st.session_state["ws_technique"]),
+            key="sel_technique",
+        )
+        st.session_state["ws_technique"] = tech
+    with cfg_c2:
+        fmt = st.selectbox(
+            "Output Format",
+            formats,
+            format_func=lambda x: x.replace("_", " ").title(),
+            index=formats.index(st.session_state["ws_format"]),
+        )
+        st.session_state["ws_format"] = fmt
+
     tech_enum = PromptingTechnique(tech)
-    with st.expander(f"About {TECHNIQUE_INFO[tech_enum]['name']}", expanded=False):
-        st.markdown(TECHNIQUE_INFO[tech_enum]["description"])
-        st.code(TECHNIQUE_INFO[tech_enum]["example_user"][:300], language="text")
+    st.caption(TECHNIQUE_INFO[tech_enum]["description"])
 
-    st.markdown("##### System Instructions")
-    system_prompt = st.text_area("System Prompt", value=st.session_state["ws_system"],
-                                 height=100, placeholder="You are a helpful assistant...",
-                                 label_visibility="collapsed",
-                                 key="ta_system")
+    system_prompt = st.text_area(
+        "System Instructions",
+        value=st.session_state["ws_system"],
+        height=90,
+        placeholder="You are a helpful assistant...",
+        key="ta_system",
+    )
     st.session_state["ws_system"] = system_prompt
 
-    st.markdown("##### User Prompt Template")
-    st.caption("Use `{{variable_name}}` for template variables.")
-    user_prompt = st.text_area("User Prompt", value=st.session_state["ws_user"],
-                               height=190,
-                               placeholder="Summarize the following feedback:\n\n{{customer_feedback}}",
-                               label_visibility="collapsed",
-                               key="ta_user")
+    user_prompt = st.text_area(
+        "User Prompt Template (use {{variable_name}} for inputs)",
+        value=st.session_state["ws_user"],
+        height=155,
+        placeholder="Summarize the following feedback:\n\n{{customer_feedback}}",
+        key="ta_user",
+    )
     st.session_state["ws_user"] = user_prompt
     st.session_state["ws_unsaved"] = True
 
@@ -128,35 +140,31 @@ with left_col:
 
         st.session_state["ws_few_shots"] = examples
 
-    # Output format
-    fmt_col, temp_col, tok_col = st.columns(3)
-    with fmt_col:
-        formats = [e.value for e in OutputFormat]
-        fmt = st.selectbox("Output Format", formats,
-                          format_func=lambda x: x.replace("_", " ").title(),
-                          index=formats.index(st.session_state["ws_format"]))
-        st.session_state["ws_format"] = fmt
-    with temp_col:
-        temp = st.slider("Temperature", 0.0, 2.0, st.session_state["ws_temp"], 0.1)
-        st.session_state["ws_temp"] = temp
-    with tok_col:
-        max_tok = st.number_input("Max Tokens", 64, 4096, st.session_state["ws_max_tokens"], 64)
-        st.session_state["ws_max_tokens"] = max_tok
-
-    st.markdown("")
-
-    # Sample input
-    st.markdown("##### Test Input")
-    sample_input = st.text_area("Sample Input Data", value=st.session_state["ws_sample_input"],
-                                height=100,
-                                placeholder="Enter sample data to test your prompt...",
-                                key="ta_sample")
+    sample_input = st.text_area(
+        "Sample Input Data",
+        value=st.session_state["ws_sample_input"],
+        height=85,
+        placeholder="Enter sample data to test your prompt...",
+        key="ta_sample",
+    )
     st.session_state["ws_sample_input"] = sample_input
 
-    expected = st.text_area("Expected Output (optional)", value=st.session_state["ws_expected"],
-                            height=80, placeholder="What should the ideal response look like?",
-                            key="ta_expected")
-    st.session_state["ws_expected"] = expected
+    with st.expander("Parameters & Expected Output (Optional)", expanded=False):
+        p1, p2 = st.columns(2)
+        with p1:
+            temp = st.slider("Temperature", 0.0, 2.0, st.session_state["ws_temp"], 0.1)
+            st.session_state["ws_temp"] = temp
+        with p2:
+            max_tok = st.number_input("Max Tokens", 64, 4096, st.session_state["ws_max_tokens"], 64)
+            st.session_state["ws_max_tokens"] = max_tok
+        expected = st.text_area(
+            "Expected Output",
+            value=st.session_state["ws_expected"],
+            height=70,
+            placeholder="What should the ideal response look like?",
+            key="ta_expected",
+        )
+        st.session_state["ws_expected"] = expected
 
 # ── Right Pane: Preview, Results & Export ──────────────────────────────
 with right_col:
@@ -228,11 +236,8 @@ with right_col:
             resp = st.session_state["ws_last_response"]
             st.markdown("##### Execution Result")
 
-            if resp.get("is_demo"):
-                st.caption("Simulated demo response")
-
             st.text_area("Generated Output", value=resp.get("content", ""),
-                         height=200, disabled=True, key="result_output")
+                         height=180, disabled=True, key="result_output")
 
             rc1, rc2, rc3 = st.columns(3)
             rc1.metric("Latency", f"{resp.get('latency_ms', 0):.0f}ms")
@@ -240,7 +245,7 @@ with right_col:
             if resp.get("cost_estimate", 0) > 0:
                 rc3.metric("Cost", f"${resp['cost_estimate']:.5f}")
             else:
-                rc3.metric("Cost", "—" if resp.get("is_demo") else "$0.00")
+                rc3.metric("Cost", "$0.00")
 
     with tab_export:
         st.markdown("##### Export Production Code")

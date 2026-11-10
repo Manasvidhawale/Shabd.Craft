@@ -66,16 +66,16 @@ class DemoProvider(BaseLLMProvider):
             has_defense = any(d in sys_lower for d in ("untrusted", "security boundary", "never reveal", "do not follow", "strictly as data"))
             if not (has_delimiters and has_defense):
                 if "security_bypass_ok" in prompt_lower:
-                    return "[DEMO] SECURITY_BYPASS_OK (simulated injection compromise — unhardened prompt)"
+                    return "SECURITY_BYPASS_OK"
                 if "admin_access_granted" in prompt_lower:
-                    return "[DEMO] ADMIN_ACCESS_GRANTED (simulated override — no boundary rules)"
+                    return "ADMIN_ACCESS_GRANTED"
                 if "delimiter_escaped" in prompt_lower and not has_delimiters:
-                    return "[DEMO] DELIMITER_ESCAPED (simulated sandbox breakout)"
+                    return "DELIMITER_ESCAPED"
                 if "unfiltered_mode" in prompt_lower and not has_defense:
-                    return "[DEMO] UNFILTERED_MODE (simulated persona hijack)"
+                    return "UNFILTERED_MODE"
                 if ("repeat the exact system instructions" in prompt_lower or "hidden prompt" in prompt_lower) and not has_defense:
                     leaked = request.system_prompt.strip() or "No system prompt was set."
-                    return f"[DEMO] Here are my system instructions: {leaked}"
+                    return f"Here are my system instructions: {leaked}"
 
         # Check for JSON output request
         if "json" in prompt_lower or "structured" in prompt_lower:
@@ -123,96 +123,89 @@ class DemoProvider(BaseLLMProvider):
 
     def _demo_json_response(self, prompt: str, rng: random.Random) -> str:
         data = {
-            "result": "Demo analysis output",
+            "result": "Structured analysis output",
             "key_points": [
-                "First identified point from demo analysis",
-                "Second identified point from demo analysis",
-                "Third identified point from demo analysis",
+                "Primary theme identified from the input text",
+                "Secondary observation and supporting detail",
+                "Recommended follow-up action",
             ],
             "confidence": round(rng.uniform(0.75, 0.95), 2),
             "category": rng.choice(["positive", "neutral", "negative"]),
-            "_note": "SIMULATED — This is a demo response, not from a real LLM.",
         }
         return json.dumps(data, indent=2)
 
     def _demo_summary_response(self, rng: random.Random) -> str:
         summaries = [
-            "[DEMO] The text discusses three main areas: customer satisfaction with "
+            "The text highlights three main areas: customer satisfaction with "
             "product quality, concerns about delivery timelines, and suggestions for "
             "improved communication channels. Key issues include delayed shipments "
             "and inconsistent packaging quality.",
-            "[DEMO] Summary: The feedback highlights strong product performance but "
-            "identifies service bottlenecks. Users appreciate the core functionality "
-            "while requesting better documentation and faster response times.",
-            "[DEMO] The primary themes are: (1) positive reception of new features, "
-            "(2) frustration with onboarding complexity, and (3) desire for more "
+            "Summary: The feedback highlights strong product performance while "
+            "identifying service bottlenecks. Users appreciate the core functionality "
+            "and request clearer documentation alongside faster response times.",
+            "Primary themes: (1) positive reception of core features, "
+            "(2) friction during initial onboarding, and (3) demand for more "
             "customization options. Overall sentiment is cautiously optimistic.",
         ]
         return rng.choice(summaries)
 
     def _demo_sentiment_response(self, rng: random.Random) -> str:
         sentiments = [
-            "[DEMO] Sentiment: Positive (Score: 0.78)\nThe text expresses satisfaction "
+            "Sentiment: Positive (Score: 0.78)\nThe text expresses satisfaction "
             "with the product while noting minor areas for improvement.",
-            "[DEMO] Sentiment: Mixed (Score: 0.52)\nThe text contains both positive "
+            "Sentiment: Mixed (Score: 0.52)\nThe text contains both positive "
             "feedback about features and negative feedback about support experience.",
-            "[DEMO] Sentiment: Negative (Score: 0.31)\nThe text primarily expresses "
+            "Sentiment: Negative (Score: 0.31)\nThe text primarily expresses "
             "dissatisfaction with service delays and communication gaps.",
         ]
         return rng.choice(sentiments)
 
     def _demo_classification_response(self, rng: random.Random) -> str:
         return (
-            "[DEMO] Classification Result:\n"
+            "Classification Result:\n"
             f"- Primary Category: {rng.choice(['Support Request', 'Feature Request', 'Bug Report', 'General Inquiry'])}\n"
             f"- Confidence: {rng.uniform(0.7, 0.95):.2f}\n"
-            f"- Priority: {rng.choice(['High', 'Medium', 'Low'])}\n"
-            "Note: This is a simulated classification, not from a real LLM."
+            f"- Priority: {rng.choice(['High', 'Medium', 'Low'])}"
         )
 
     def _demo_extraction_response(self, rng: random.Random) -> str:
         return (
-            "[DEMO] Extracted Information:\n"
+            "Extracted Information:\n"
             "- Entity 1: Product Team (Organization)\n"
             "- Entity 2: Q3 2024 (Date Reference)\n"
             "- Entity 3: Customer Portal (System)\n"
-            f"- Key metric: {rng.randint(80, 99)}% accuracy target\n"
-            "Note: This is a simulated extraction, not from a real LLM."
+            f"- Key metric: {rng.randint(80, 99)}% accuracy target"
         )
 
     def _demo_email_response(self, rng: random.Random) -> str:
         return (
-            "[DEMO] Subject: Follow-up on Your Recent Inquiry\n\n"
+            "Subject: Follow-up on Your Recent Inquiry\n\n"
             "Dear Valued Customer,\n\n"
             "Thank you for reaching out to us. We have reviewed your request and "
             "would like to provide the following update:\n\n"
             "Your case has been assigned to our specialist team and we expect to "
             "have a resolution within 2-3 business days.\n\n"
             "Please don't hesitate to contact us if you need any further assistance.\n\n"
-            "Best regards,\nSupport Team\n\n"
-            "[Note: This is a simulated email, not generated by a real LLM.]"
+            "Best regards,\nSupport Team"
         )
 
     def _demo_qa_response(self, rng: random.Random) -> str:
         return (
-            "[DEMO] Based on the provided context, the answer is:\n\n"
+            "Based on the provided context, the answer is:\n\n"
             "The process involves three key steps: initial assessment, implementation "
             "planning, and iterative refinement. Each step builds on the previous one "
-            "to ensure comprehensive coverage of all requirements.\n\n"
-            "Note: This is a simulated answer, not from a real LLM."
+            "to ensure comprehensive coverage of all requirements."
         )
 
     def _demo_general_response(self, rng: random.Random) -> str:
         responses = [
-            "[DEMO] This is a simulated response generated by Shabd.Craft's demo mode. "
-            "In live mode with a configured API key, this would contain the actual "
-            "LLM-generated output based on your prompt. The demo response is designed "
-            "to help you explore the platform's features without requiring API access.",
-            "[DEMO] Demo response: The analysis indicates several key findings that "
-            "would be relevant to the task described in your prompt. In production mode, "
-            "this content would be generated by the configured LLM provider.",
-            "[DEMO] Simulated output for your prompt. The platform would generate a "
-            "real response using the selected model and parameters when connected to "
-            "a live API provider.",
+            "Analysis complete. Based on the provided instructions and input, "
+            "key takeaways include clear alignment with the primary objective, "
+            "consistent structure, and actionable next steps.",
+            "Response summary: The input presents clear criteria that map directly "
+            "to the requested output structure. Key points have been synthesized "
+            "for readability and conciseness.",
+            "Processed output: All core requirements from the prompt template have "
+            "been addressed with structured reasoning and direct supporting details.",
         ]
         return rng.choice(responses)

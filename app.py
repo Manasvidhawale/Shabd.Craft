@@ -14,10 +14,12 @@ import streamlit as st
 from src.config import settings
 from src.ui_helpers import get_database
 
+_ASSETS_DIR = Path(__file__).parent / "assets"
+
 # ── Page Config (called once for the whole app) ────────────────────────
 st.set_page_config(
     page_title="Shabd.Craft — Prompt Engineering Platform",
-    page_icon="✦",
+    page_icon=str(_ASSETS_DIR / "icon.svg"),
     layout="wide",
     initial_sidebar_state="expanded",
 )
@@ -51,19 +53,28 @@ st.markdown("""
     font-family: 'Inter', -apple-system, sans-serif;
 }
 
+.block-container {
+    padding-top: 2rem !important;
+    padding-bottom: 2.5rem !important;
+}
+
 /* Sidebar */
 section[data-testid="stSidebar"] {
     background-color: var(--bg-secondary);
     border-right: 1px solid var(--border-color);
 }
 
-section[data-testid="stSidebar"] .stMarkdown h1 {
-    font-size: 1.35rem;
-    font-weight: 700;
-    letter-spacing: -0.02em;
-    background: linear-gradient(135deg, var(--accent-violet), var(--accent-cyan));
-    -webkit-background-clip: text;
-    -webkit-text-fill-color: transparent;
+[data-testid="stSidebarNav"] {
+    padding-top: 0.25rem !important;
+}
+
+[data-testid="stSidebarNavItems"] {
+    max-height: none !important;
+    overflow-y: visible !important;
+}
+
+[data-testid="stSidebarNavSeparator"] {
+    margin: 0.4rem 0 !important;
 }
 
 /* Metric cards */
@@ -282,7 +293,9 @@ def init_session_state() -> None:
 init_session_state()
 get_database()
 
-# ── Navigation & Shared Sidebar ────────────────────────────────────────
+# ── Top-left Brand Logo & Navigation ───────────────────────────────────
+st.logo(str(_ASSETS_DIR / "logo.svg"), icon_image=str(_ASSETS_DIR / "icon.svg"))
+
 pg = st.navigation({
     "Workflow": [
         st.Page("views/0_Home.py", title="Home", default=True),
@@ -297,18 +310,5 @@ pg = st.navigation({
         st.Page("views/7_Settings.py", title="Settings"),
     ],
 })
-
-with st.sidebar:
-    st.markdown("# ✦ Shabd.Craft")
-    st.caption("Craft Better Prompts. Measure Better Intelligence.")
-    st.divider()
-
-    if settings.is_demo_mode:
-        st.markdown('<span class="status-badge badge-demo">Demo Mode</span>', unsafe_allow_html=True)
-    else:
-        st.markdown('<span class="status-badge badge-live">Live Mode</span>', unsafe_allow_html=True)
-
-    st.caption(f"Provider: **{settings.active_provider}** · Model: **{settings.active_model}**")
-    st.divider()
 
 pg.run()

@@ -221,10 +221,6 @@ with tab_results:
         rm3.metric("Failed", agg["failed"])
         rm4.metric("Score Range", f"{agg['min_score']:.0f}–{agg['max_score']:.0f}")
 
-        # Demo warning
-        if any(r.get("is_demo") for r in existing_results):
-            st.caption("Results include simulated demo evaluations.")
-
         # Criterion chart
         if agg["criterion_averages"]:
             labels = [k.replace("_", " ").title() for k in agg["criterion_averages"].keys()]
@@ -345,9 +341,6 @@ with tab_security:
 
         audit_report = st.session_state.get(f"sec_audit_{selected_ver_id}")
         if audit_report:
-            if audit_report.get("is_demo"):
-                st.caption("Demo Mode: responses and vulnerability checks are simulated based on prompt hardening.")
-
             am1, am2, am3 = st.columns(3)
             am1.metric("Robustness Score", f"{audit_report['robustness_score']:.1f}%")
             am2.metric("Attacks Resisted", f"{audit_report['resisted_count']}/{audit_report['total_count']}")

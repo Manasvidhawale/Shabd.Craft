@@ -21,29 +21,19 @@ tab_config, tab_eval, tab_docs = st.tabs(["Provider & Model", "Evaluation Defaul
 with tab_config:
     st.markdown("##### LLM Provider Configuration")
 
-    st.markdown(f"**Active Provider:** `{settings.active_provider}`")
-    st.markdown(f"**Active Model:** `{settings.active_model}`")
-
     # API Key status
-    if settings.has_api_key:
+    if settings.has_api_key and not settings.demo_mode:
         st.success("OpenAI API key is configured.")
     else:
-        st.warning("No API key configured. Running in demo mode.")
+        st.info("No OpenAI API key configured — using local offline fallback engine.")
         st.markdown("""
-        **Setup Instructions:**
-        1. Copy `.env.example` to `.env` in the project root.
+        **Enable Live API Calls:**
+        1. Open `.env` in the project root.
         2. Set `OPENAI_API_KEY=your_actual_key_here`
         3. Restart the application.
-
-        ```bash
-        cp .env.example .env
-        # Edit .env and add your API key
-        streamlit run app.py
-        ```
         """)
 
-    st.markdown(f"**Demo Mode:** {'Enabled' if settings.is_demo_mode else 'Disabled'}")
-    st.caption("Set `SHABDCRAFT_DEMO_MODE=true` in .env to force demo mode even with an API key.")
+    st.markdown(f"**Default Model:** `{settings.default_model}`")
 
     st.divider()
 
@@ -138,7 +128,8 @@ with tab_docs:
     | Few-Shot | Multiple examples | Complex tasks with nuanced patterns |
     | Role-Based | Assigns expertise and context | Domain-specific analysis |
     | Structured Output | Requires specific format (JSON, etc.) | Machine-parseable outputs |
-    | Task Decomposition | Breaks task into steps | Multi-step reasoning |
+    | Task Decomposition | Breaks task into steps | Multi-step workflows |
+    | Chain-of-Thought (CoT) | Elicits step-by-step reasoning before final answer | Logic, math, and multi-step inference |
 
     ### Evaluation Criteria
 
@@ -150,14 +141,9 @@ with tab_docs:
     | Clarity | Readability, organization, completeness | 0-100 |
     | Format Compliance | Matches required output format | 0-100 |
 
-    ### Demo Mode
+    ### Offline Fallback Provider
 
-    Demo mode returns clearly-labeled simulated responses. All demo outputs are prefixed with `[DEMO]`. Demo mode:
-
-    - Works without an API key
-    - Uses deterministic responses based on prompt content
-    - Does not fabricate real token counts, costs, or timings
-    - Allows full exploration of the platform's features
+    When no `OPENAI_API_KEY` is configured in `.env`, Shabd.Craft automatically uses a deterministic local provider so all evaluation, optimization, security audit, and export workflows remain functional offline.
 
     ### Future: Multi-Agent Extension
 

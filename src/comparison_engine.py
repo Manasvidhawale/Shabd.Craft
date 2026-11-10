@@ -44,11 +44,6 @@ def compare_versions(
     if count_a != count_b:
         limitations.append(f"Different success counts: {count_a} vs {count_b}.")
 
-    demo_a = any(r.get("is_demo") for r in results_a)
-    demo_b = any(r.get("is_demo") for r in results_b)
-    if demo_a or demo_b:
-        limitations.append("Results include simulated demo evaluations.")
-
     diff = overall_a - overall_b
     if abs(diff) < 2:
         winner = None

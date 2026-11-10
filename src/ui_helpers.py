@@ -96,3 +96,4 @@ def load_template_into_workshop(tmpl: dict) -> None:
     # Clear widget-bound keys so text areas/selectboxes pick up the new values
     for widget_key in ("ta_system", "ta_user", "sel_technique", "input_exp_name", "ta_sample", "ta_expected"):
         st.session_state.pop(widget_key, None)
+
