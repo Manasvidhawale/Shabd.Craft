@@ -343,4 +343,4 @@ if eval_clicked:
     if not st.session_state.get("current_experiment_id"):
         st.warning("Save the experiment first before sending to Evaluation Lab.")
     else:
-        st.switch_page("pages/3_Evaluation_Lab.py")
+        st.switch_page("pages/2_Evaluation_Lab.py")

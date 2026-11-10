@@ -351,13 +351,13 @@ st.markdown("""
 col_a, col_b, col_c = st.columns([1, 1, 1])
 with col_a:
     if st.button("✦ Start Crafting", use_container_width=True, type="primary"):
-        st.switch_page("pages/2_Prompt_Workshop.py")
+        st.switch_page("pages/1_Prompt_Workshop.py")
 with col_b:
     if st.button("📚 Prompt Library", use_container_width=True):
-        st.switch_page("pages/7_Prompt_Library.py")
+        st.switch_page("pages/6_Prompt_Library.py")
 with col_c:
     if st.button("⚙ Settings", use_container_width=True):
-        st.switch_page("pages/8_Settings.py")
+        st.switch_page("pages/7_Settings.py")
 
 st.markdown("")
 
@@ -499,7 +499,7 @@ else:
     c1, c2, c3 = st.columns([1, 2, 1])
     with c2:
         if st.button("✦ Create Your First Experiment", use_container_width=True, type="primary"):
-            st.switch_page("pages/2_Prompt_Workshop.py")
+            st.switch_page("pages/1_Prompt_Workshop.py")
 
     # Quick-start templates
     st.markdown("")
@@ -527,4 +527,4 @@ else:
                     st.session_state["prompt_user"] = tmpl["user_prompt_template"]
                     st.session_state["prompt_technique"] = tmpl.get("technique", "zero_shot")
                     st.session_state["prompt_output_format"] = tmpl.get("output_format", "text")
-                    st.switch_page("pages/2_Prompt_Workshop.py")
+                    st.switch_page("pages/1_Prompt_Workshop.py")

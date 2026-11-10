@@ -33,7 +33,7 @@ experiments = db.list_experiments(limit=100)
 if not experiments:
     st.info("No experiments yet. Start by creating one in the Prompt Workshop.")
     if st.button("✦ Go to Prompt Workshop", type="primary"):
-        st.switch_page("pages/2_Prompt_Workshop.py")
+        st.switch_page("pages/1_Prompt_Workshop.py")
     st.stop()
 
 # ── Search & Filter ────────────────────────────────────────────────────
@@ -88,12 +88,13 @@ for exp in filtered:
         with a1:
             if st.button("🔬 Evaluate", key=f"eval_{exp['id']}"):
                 st.session_state["current_experiment_id"] = exp["id"]
-                st.switch_page("pages/3_Evaluation_Lab.py")
+                st.switch_page("pages/2_Evaluation_Lab.py")
 
         with a2:
             if len(versions) >= 2:
                 if st.button("🔀 Compare", key=f"cmp_{exp['id']}"):
-                    st.switch_page("pages/5_Compare_Versions.py")
+                    st.session_state["current_experiment_id"] = exp["id"]
+                    st.switch_page("pages/4_Compare_Versions.py")
 
         with a3:
             if st.button("📋 Duplicate", key=f"dup_{exp['id']}"):

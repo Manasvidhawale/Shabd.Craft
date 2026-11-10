@@ -106,7 +106,7 @@ with tab_browse:
                             st.session_state["ws_user"] = tmpl["user_prompt_template"]
                             st.session_state["ws_technique"] = tmpl.get("technique", "zero_shot")
                             st.session_state["ws_format"] = tmpl.get("output_format", "text")
-                            st.switch_page("pages/2_Prompt_Workshop.py")
+                            st.switch_page("pages/1_Prompt_Workshop.py")
                     with bc2:
                         if st.button("👁 Preview", key=f"prev_{tmpl['id']}"):
                             st.session_state[f"preview_{tmpl['id']}"] = True

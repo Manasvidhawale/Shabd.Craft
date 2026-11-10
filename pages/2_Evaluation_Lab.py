@@ -46,7 +46,7 @@ experiments = db.list_experiments()
 if not experiments:
     st.info("No experiments found. Create one in the **Prompt Workshop** first.")
     if st.button("✦ Go to Prompt Workshop", type="primary"):
-        st.switch_page("pages/2_Prompt_Workshop.py")
+        st.switch_page("pages/1_Prompt_Workshop.py")
     st.stop()
 
 exp_options = {e["id"]: f"{e['name']} ({e['category']})" for e in experiments}
