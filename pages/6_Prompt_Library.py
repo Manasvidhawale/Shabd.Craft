@@ -25,19 +25,19 @@ def get_db():
 
 db = get_db()
 
-st.markdown("## 📚 Prompt Library")
+st.markdown("## Prompt Library")
 st.caption("Browse, search, and manage reusable prompt templates.")
 st.divider()
 
 # ── Tabs ───────────────────────────────────────────────────────────────
-tab_browse, tab_create = st.tabs(["📖 Browse Templates", "➕ Create Template"])
+tab_browse, tab_create = st.tabs(["Browse Templates", "Create Template"])
 
 # ── Browse Tab ─────────────────────────────────────────────────────────
 with tab_browse:
     # Filters
     f1, f2, f3 = st.columns([3, 1, 1])
     with f1:
-        search = st.text_input("🔍 Search", placeholder="Search templates...", key="lib_search")
+        search = st.text_input("Search", placeholder="Search templates...", key="lib_search")
     with f2:
         cat_options = ["All"] + [e.value for e in TaskCategory]
         cat_filter = st.selectbox("Category", cat_options,
@@ -67,16 +67,11 @@ with tab_browse:
     if not templates:
         st.info("No templates match your filters.")
     else:
-        icons = {"summarization": "📝", "extraction": "🔍", "sentiment": "💬",
-                 "question_answering": "❓", "email_generation": "✉️",
-                 "classification": "🏷️", "json_generation": "{ }", "general": "📄",
-                 "customer_support": "🤝", "data_analysis": "📊"}
-
         # Display in grid
         cols = st.columns(2)
         for i, tmpl in enumerate(templates):
             with cols[i % 2]:
-                icon = icons.get(tmpl["category"], "📄")
+                cat_tag = tmpl["category"].replace("_", " ").upper()
                 is_builtin = tmpl.get("is_builtin", False)
                 badge = "Built-in" if is_builtin else "Custom"
                 badge_color = "#7c5cfc" if is_builtin else "#22d3ee"
@@ -84,20 +79,21 @@ with tab_browse:
                 with st.container():
                     st.markdown(f"""
                     <div style="background:#1e2130;border:1px solid #2a2d3e;border-radius:12px;padding:1.2rem;margin-bottom:0.8rem;">
-                        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:0.5rem;">
-                            <span style="font-size:1.1rem;">{icon} <strong style="color:#e8eaed;">{tmpl['name']}</strong></span>
+                        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:0.4rem;">
+                            <span style="font-size:0.7rem;font-weight:600;letter-spacing:0.08em;color:#22d3ee;">{cat_tag}</span>
                             <span style="font-size:0.68rem;padding:2px 8px;border-radius:12px;background:rgba({','.join(['124,92,252' if is_builtin else '34,211,238'])},0.15);color:{badge_color};">{badge}</span>
                         </div>
+                        <div style="font-size:1.05rem;font-weight:600;color:#e8eaed;margin-bottom:0.3rem;">{tmpl['name']}</div>
                         <p style="color:#9ba3b5;font-size:0.82rem;margin:0.3rem 0;">{tmpl.get('description', '')[:120]}</p>
                         <div style="color:#6b7280;font-size:0.72rem;margin-top:0.4rem;">
-                            {tmpl['category'].replace('_',' ').title()} · {tmpl.get('technique', 'zero_shot').replace('_',' ').title()}
+                            Technique: {tmpl.get('technique', 'zero_shot').replace('_',' ').title()}
                         </div>
                     </div>
                     """, unsafe_allow_html=True)
 
                     bc1, bc2, bc3 = st.columns(3)
                     with bc1:
-                        if st.button("✦ Use", key=f"use_{tmpl['id']}"):
+                        if st.button("Use", key=f"use_{tmpl['id']}"):
                             st.session_state["prompt_system"] = tmpl.get("system_prompt", "")
                             st.session_state["prompt_user"] = tmpl["user_prompt_template"]
                             st.session_state["prompt_technique"] = tmpl.get("technique", "zero_shot")
@@ -108,11 +104,11 @@ with tab_browse:
                             st.session_state["ws_format"] = tmpl.get("output_format", "text")
                             st.switch_page("pages/1_Prompt_Workshop.py")
                     with bc2:
-                        if st.button("👁 Preview", key=f"prev_{tmpl['id']}"):
+                        if st.button("Preview", key=f"prev_{tmpl['id']}"):
                             st.session_state[f"preview_{tmpl['id']}"] = True
                     with bc3:
                         if not is_builtin:
-                            if st.button("🗑 Delete", key=f"del_t_{tmpl['id']}"):
+                            if st.button("Delete", key=f"del_t_{tmpl['id']}"):
                                 db.delete_prompt_template(tmpl["id"])
                                 st.rerun()
 
@@ -167,7 +163,7 @@ with tab_create:
         ct_example_in = st.text_area("Example Input", height=60)
         ct_example_out = st.text_area("Example Output", height=60)
 
-        if st.form_submit_button("💾 Save Template", type="primary"):
+        if st.form_submit_button("Save Template", type="primary"):
             if not ct_name.strip():
                 st.error("Template name is required.")
             elif not ct_user.strip():

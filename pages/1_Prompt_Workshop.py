@@ -52,12 +52,12 @@ for key, default in [
         st.session_state[key] = default
 
 # ── Header ─────────────────────────────────────────────────────────────
-st.markdown("## ✦ Prompt Workshop")
+st.markdown("## Prompt Workshop")
 st.caption("Craft, preview, and execute prompts with different techniques.")
 
 # Mode indicator
 if settings.is_demo_mode:
-    st.markdown('<span class="status-badge badge-demo" style="display:inline-block;padding:3px 10px;border-radius:20px;font-size:0.72rem;font-weight:600;background:rgba(251,191,36,0.15);color:#fbbf24;border:1px solid rgba(251,191,36,0.3);">⚡ Demo Mode — responses are simulated</span>', unsafe_allow_html=True)
+    st.markdown('<span class="status-badge badge-demo" style="display:inline-block;padding:3px 10px;border-radius:20px;font-size:0.72rem;font-weight:600;background:rgba(251,191,36,0.15);color:#fbbf24;border:1px solid rgba(251,191,36,0.3);">Demo Mode — responses are simulated</span>', unsafe_allow_html=True)
 
 st.divider()
 
@@ -80,7 +80,7 @@ with bar3:
                          index=0)
 with bar4:
     st.markdown(f"**Provider:** {settings.active_provider}")
-    st.markdown(f"**Status:** {'🟢 Ready' if get_provider().is_available() else '🔴 Unavailable'}")
+    st.markdown(f"**Status:** {'Ready' if get_provider().is_available() else 'Unavailable'}")
 
 st.markdown("")
 
@@ -100,7 +100,7 @@ with left_col:
 
     # Technique info
     tech_enum = PromptingTechnique(tech)
-    with st.expander(f"ℹ About {TECHNIQUE_INFO[tech_enum]['name']}", expanded=False):
+    with st.expander(f"About {TECHNIQUE_INFO[tech_enum]['name']}", expanded=False):
         st.markdown(TECHNIQUE_INFO[tech_enum]["description"])
         st.code(TECHNIQUE_INFO[tech_enum]["example_user"][:300], language="text")
 
@@ -183,7 +183,7 @@ with right_col:
 
         if validation["warnings"]:
             for w in validation["warnings"]:
-                st.warning(w, icon="⚠️")
+                st.warning(w)
 
         # Preview with sample data
         var_values = {}
@@ -208,22 +208,22 @@ with right_col:
         st.markdown("##### Prompt Analysis")
         issues = []
         if not system_prompt:
-            issues.append("⚡ No system prompt — consider adding role/context instructions.")
+            issues.append("No system prompt — consider adding role/context instructions.")
         if len(user_prompt) < 20:
-            issues.append("⚡ Very short prompt — may lack specificity.")
+            issues.append("Very short prompt — may lack specificity.")
         if "{{" not in user_prompt and tech == "zero_shot":
-            issues.append("💡 No template variables — prompt will be static.")
+            issues.append("No template variables — prompt will be static.")
         if fmt == "json" and "json" not in user_prompt.lower():
-            issues.append("💡 JSON output selected but not mentioned in prompt.")
+            issues.append("JSON output selected but not mentioned in prompt.")
         if not any(kw in user_prompt.lower() for kw in ["step", "1.", "first", "then", "finally"]):
             if tech == "task_decomposition":
-                issues.append("⚡ Task decomposition selected but no steps in prompt.")
+                issues.append("Task decomposition selected but no steps in prompt.")
 
         if issues:
             for issue in issues:
                 st.markdown(f"- {issue}")
         else:
-            st.success("Prompt looks well-structured!", icon="✅")
+            st.success("Prompt looks well-structured.")
 
     st.divider()
 
@@ -233,7 +233,7 @@ with right_col:
         st.markdown("##### Execution Result")
 
         if resp.get("is_demo"):
-            st.caption("⚡ Simulated demo response")
+            st.caption("Simulated demo response")
 
         st.text_area("Generated Output", value=resp.get("content", ""),
                      height=200, disabled=True, key="result_output")
@@ -251,16 +251,16 @@ st.divider()
 act1, act2, act3, act4 = st.columns(4)
 
 with act1:
-    run_clicked = st.button("▶ Run Prompt", type="primary", use_container_width=True)
+    run_clicked = st.button("Run Prompt", type="primary", use_container_width=True)
 
 with act2:
-    save_clicked = st.button("💾 Save Experiment", use_container_width=True)
+    save_clicked = st.button("Save Experiment", use_container_width=True)
 
 with act3:
-    eval_clicked = st.button("🔬 Send to Evaluation Lab", use_container_width=True)
+    eval_clicked = st.button("Send to Evaluation Lab", use_container_width=True)
 
 with act4:
-    reset_clicked = st.button("↺ Reset", use_container_width=True)
+    reset_clicked = st.button("Reset", use_container_width=True)
 
 # ── Handle Actions ─────────────────────────────────────────────────────
 
@@ -299,7 +299,7 @@ if run_clicked:
             st.error(f"Execution failed: {response.error}")
         else:
             st.session_state["ws_last_response"] = response.model_dump()
-            st.success("Prompt executed successfully!", icon="✅")
+            st.success("Prompt executed successfully.")
             st.rerun()
 
 if save_clicked:
@@ -337,7 +337,7 @@ if save_clicked:
         st.session_state["current_experiment_id"] = exp_id
         st.session_state["current_version_id"] = ver_id
         st.session_state["ws_unsaved"] = False
-        st.success(f"Experiment **{name}** saved!", icon="✅")
+        st.success(f"Experiment **{name}** saved.")
 
 if eval_clicked:
     if not st.session_state.get("current_experiment_id"):

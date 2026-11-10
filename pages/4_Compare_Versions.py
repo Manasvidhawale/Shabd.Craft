@@ -24,7 +24,7 @@ def get_db():
 
 db = get_db()
 
-st.markdown("## 🔀 Compare Versions")
+st.markdown("## Compare Versions")
 st.caption("Side-by-side comparison of prompt versions with shared test cases.")
 st.divider()
 

@@ -24,7 +24,7 @@ def get_db():
 
 db = get_db()
 
-st.markdown("## 📋 Experiment History")
+st.markdown("## Experiment History")
 st.caption("View, manage, and export your prompt engineering experiments.")
 st.divider()
 
@@ -32,14 +32,14 @@ experiments = db.list_experiments(limit=100)
 
 if not experiments:
     st.info("No experiments yet. Start by creating one in the Prompt Workshop.")
-    if st.button("✦ Go to Prompt Workshop", type="primary"):
+    if st.button("Go to Prompt Workshop", type="primary"):
         st.switch_page("pages/1_Prompt_Workshop.py")
     st.stop()
 
 # ── Search & Filter ────────────────────────────────────────────────────
 f1, f2 = st.columns([3, 1])
 with f1:
-    search = st.text_input("🔍 Search experiments", placeholder="Search by name...")
+    search = st.text_input("Search experiments", placeholder="Search by name...")
 with f2:
     categories = sorted(set(e["category"] for e in experiments))
     cat_filter = st.selectbox("Category", ["All"] + categories)
@@ -57,10 +57,10 @@ st.markdown("")
 # ── Experiment List ────────────────────────────────────────────────────
 for exp in filtered:
     summary = get_experiment_summary(db, exp["id"])
-    status_icon = {"pending": "⏳", "running": "🔄", "success": "✅",
-                   "failed": "❌", "partial": "⚠"}.get(exp["status"], "⏳")
+    status_label = {"pending": "[PENDING]", "running": "[RUNNING]", "success": "[SUCCESS]",
+                    "failed": "[FAILED]", "partial": "[PARTIAL]"}.get(exp["status"], "[PENDING]")
 
-    with st.expander(f"{status_icon} {exp['name']} — {exp['category'].replace('_',' ').title()}", expanded=False):
+    with st.expander(f"{status_label} {exp['name']} — {exp['category'].replace('_',' ').title()}", expanded=False):
         # Info row
         ic1, ic2, ic3, ic4 = st.columns(4)
         ic1.metric("Versions", summary.get("version_count", 0))
@@ -77,7 +77,7 @@ for exp in filtered:
         if versions:
             st.markdown("**Prompt Versions:**")
             for v in versions:
-                opt_badge = " 🔧" if v.get("is_optimized") else ""
+                opt_badge = " (Optimized)" if v.get("is_optimized") else ""
                 st.markdown(f"- v{v['version_number']}: {v['version_label']}{opt_badge}")
 
         st.markdown("")
@@ -86,18 +86,18 @@ for exp in filtered:
         a1, a2, a3, a4, a5 = st.columns(5)
 
         with a1:
-            if st.button("🔬 Evaluate", key=f"eval_{exp['id']}"):
+            if st.button("Evaluate", key=f"eval_{exp['id']}"):
                 st.session_state["current_experiment_id"] = exp["id"]
                 st.switch_page("pages/2_Evaluation_Lab.py")
 
         with a2:
             if len(versions) >= 2:
-                if st.button("🔀 Compare", key=f"cmp_{exp['id']}"):
+                if st.button("Compare", key=f"cmp_{exp['id']}"):
                     st.session_state["current_experiment_id"] = exp["id"]
                     st.switch_page("pages/4_Compare_Versions.py")
 
         with a3:
-            if st.button("📋 Duplicate", key=f"dup_{exp['id']}"):
+            if st.button("Duplicate", key=f"dup_{exp['id']}"):
                 new_id = duplicate_experiment(db, exp["id"], f"{exp['name']} (copy)")
                 if new_id:
                     st.success("Experiment duplicated!")
@@ -109,13 +109,13 @@ for exp in filtered:
             test_cases = summary.get("test_cases", [])
             if results:
                 json_export = export_results_json(exp, versions, test_cases, results)
-                st.download_button("📥 Export", json_export,
+                st.download_button("Export", json_export,
                                   file_name=f"{exp['name']}_export.json",
                                   mime="application/json",
                                   key=f"exp_{exp['id']}")
 
         with a5:
-            if st.button("🗑 Delete", key=f"del_{exp['id']}"):
+            if st.button("Delete", key=f"del_{exp['id']}"):
                 st.session_state[f"confirm_del_{exp['id']}"] = True
 
             if st.session_state.get(f"confirm_del_{exp['id']}"):

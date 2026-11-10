@@ -30,11 +30,11 @@ def get_db():
 
 db = get_db()
 
-st.markdown("## ⚡ Prompt Optimizer")
+st.markdown("## Prompt Optimizer")
 st.caption("Generate improved prompt candidates, test them, and compare results.")
 
 if settings.is_demo_mode:
-    st.markdown('<span style="display:inline-block;padding:3px 10px;border-radius:20px;font-size:0.72rem;font-weight:600;background:rgba(251,191,36,0.15);color:#fbbf24;border:1px solid rgba(251,191,36,0.3);">⚡ Demo Mode — optimization uses simulated responses</span>', unsafe_allow_html=True)
+    st.markdown('<span style="display:inline-block;padding:3px 10px;border-radius:20px;font-size:0.72rem;font-weight:600;background:rgba(251,191,36,0.15);color:#fbbf24;border:1px solid rgba(251,191,36,0.3);">Demo Mode — optimization uses simulated responses</span>', unsafe_allow_html=True)
 
 st.divider()
 
@@ -42,7 +42,7 @@ st.divider()
 experiments = db.list_experiments()
 if not experiments:
     st.info("Create and evaluate an experiment first.")
-    if st.button("✦ Go to Prompt Workshop", type="primary"):
+    if st.button("Go to Prompt Workshop", type="primary"):
         st.switch_page("pages/1_Prompt_Workshop.py")
     st.stop()
 
@@ -60,7 +60,7 @@ sel_ver = st.selectbox("Base Prompt Version", list(ver_opts.keys()), format_func
 ver_data = db.get_prompt_version(sel_ver)
 
 # Show current prompt
-with st.expander("📄 Current Prompt", expanded=True):
+with st.expander("Current Prompt", expanded=True):
     if ver_data.get("system_prompt"):
         st.markdown("**System:**")
         st.code(ver_data["system_prompt"], language="text")
@@ -84,7 +84,7 @@ st.markdown("##### Generate Optimization Candidates")
 
 num_cands = st.slider("Number of candidates", 1, 3, 3)
 
-if st.button("⚡ Generate Candidates", type="primary", use_container_width=True):
+if st.button("Generate Candidates", type="primary", use_container_width=True):
     if not ver_data:
         st.error("Version not found.")
     else:
@@ -141,8 +141,8 @@ if existing_candidates:
     st.markdown("##### Optimization Candidates")
 
     for i, cand in enumerate(existing_candidates):
-        status_icon = {"pending": "⏳", "success": "✅", "failed": "❌"}.get(cand["status"], "⏳")
-        with st.expander(f"{status_icon} {cand['candidate_label']} — {cand['strategy']}", expanded=(i == 0)):
+        status_label = {"pending": "[PENDING]", "success": "[TESTED]", "failed": "[REMOVED]"}.get(cand["status"], "[PENDING]")
+        with st.expander(f"{status_label} {cand['candidate_label']} — {cand['strategy']}", expanded=(i == 0)):
             st.markdown(f"**Strategy:** {cand['strategy']}")
             st.markdown(f"**Changes:** {cand['changes_description']}")
             st.markdown(f"**Rationale:** {cand['rationale']}")
@@ -160,7 +160,7 @@ if existing_candidates:
             ac1, ac2, ac3 = st.columns(3)
             with ac1:
                 if cand["status"] == "pending":
-                    if st.button("▶ Test Candidate", key=f"test_{cand['id']}"):
+                    if st.button("Test Candidate", key=f"test_{cand['id']}"):
                         test_cases = db.get_test_cases(sel_exp)
                         if not test_cases:
                             st.error("No test cases available.")
@@ -207,13 +207,13 @@ if existing_candidates:
 
             with ac2:
                 if cand["status"] == "success" and not cand.get("is_accepted"):
-                    if st.button("✅ Accept", key=f"accept_{cand['id']}"):
+                    if st.button("Accept", key=f"accept_{cand['id']}"):
                         db.accept_candidate(cand["id"])
-                        st.success("Candidate accepted!")
+                        st.success("Candidate accepted.")
                         st.rerun()
 
             with ac3:
-                if st.button("🗑 Remove", key=f"remove_{cand['id']}"):
+                if st.button("Remove", key=f"remove_{cand['id']}"):
                     # Just mark as rejected - data preserved
                     db.update_candidate_score(cand["id"], cand.get("overall_score", 0), "failed")
                     st.rerun()
@@ -229,9 +229,9 @@ if existing_candidates:
         rec = recommend_best(original_avg, tested, len(test_cases))
 
         if rec["improvement"]:
-            st.success(f"✅ {rec['recommendation']}")
+            st.success(rec["recommendation"])
         else:
-            st.info(f"ℹ {rec['recommendation']}")
+            st.info(rec["recommendation"])
 
         if rec["limitations"]:
             st.caption("**Limitations:** " + " · ".join(rec["limitations"]))

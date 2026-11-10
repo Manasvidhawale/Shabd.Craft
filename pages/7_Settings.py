@@ -13,11 +13,11 @@ from src.config import settings
 
 st.set_page_config(page_title="Settings — Shabd.Craft", page_icon="✦", layout="wide")
 
-st.markdown("## ⚙ Settings & Configuration")
+st.markdown("## Settings & Configuration")
 st.caption("Configure providers, evaluation defaults, and execution limits.")
 st.divider()
 
-tab_config, tab_eval, tab_docs = st.tabs(["🔌 Provider & Model", "📊 Evaluation Defaults", "📖 Documentation"])
+tab_config, tab_eval, tab_docs = st.tabs(["Provider & Model", "Evaluation Defaults", "Documentation"])
 
 # ── Provider Config ────────────────────────────────────────────────────
 with tab_config:
@@ -28,9 +28,9 @@ with tab_config:
 
     # API Key status
     if settings.has_api_key:
-        st.success("✅ OpenAI API key is configured.", icon="🔑")
+        st.success("OpenAI API key is configured.")
     else:
-        st.warning("⚠ No API key configured. Running in demo mode.", icon="🔑")
+        st.warning("No API key configured. Running in demo mode.")
         st.markdown("""
         **Setup Instructions:**
         1. Copy `.env.example` to `.env` in the project root.

@@ -32,11 +32,11 @@ def get_db():
 
 db = get_db()
 
-st.markdown("## 🔬 Evaluation Lab")
+st.markdown("## Evaluation Lab")
 st.caption("Test prompts against datasets and measure performance with systematic evaluation.")
 
 if settings.is_demo_mode:
-    st.markdown('<span style="display:inline-block;padding:3px 10px;border-radius:20px;font-size:0.72rem;font-weight:600;background:rgba(251,191,36,0.15);color:#fbbf24;border:1px solid rgba(251,191,36,0.3);">⚡ Demo Mode — evaluations are simulated</span>', unsafe_allow_html=True)
+    st.markdown('<span style="display:inline-block;padding:3px 10px;border-radius:20px;font-size:0.72rem;font-weight:600;background:rgba(251,191,36,0.15);color:#fbbf24;border:1px solid rgba(251,191,36,0.3);">Demo Mode — evaluations are simulated</span>', unsafe_allow_html=True)
 
 st.divider()
 
@@ -45,7 +45,7 @@ experiments = db.list_experiments()
 
 if not experiments:
     st.info("No experiments found. Create one in the **Prompt Workshop** first.")
-    if st.button("✦ Go to Prompt Workshop", type="primary"):
+    if st.button("Go to Prompt Workshop", type="primary"):
         st.switch_page("pages/1_Prompt_Workshop.py")
     st.stop()
 
@@ -70,7 +70,7 @@ selected_ver_id = st.selectbox("Select Prompt Version", list(ver_options.keys())
 st.markdown("")
 
 # ── Tabs ───────────────────────────────────────────────────────────────
-tab_data, tab_config, tab_results = st.tabs(["📋 Test Cases", "⚙ Evaluation Config", "📊 Results"])
+tab_data, tab_config, tab_results = st.tabs(["Test Cases", "Evaluation Config", "Results"])
 
 # ── Tab 1: Test Cases ──────────────────────────────────────────────────
 with tab_data:
@@ -89,12 +89,12 @@ with tab_data:
         if sample_path.exists():
             with open(sample_path, "r") as f:
                 sample_data = f.read()
-            st.download_button("📥 Sample Dataset", sample_data,
+            st.download_button("Sample Dataset", sample_data,
                              file_name="sample_test_cases.json", mime="application/json")
     with imp3:
         if test_cases:
             csv_export = export_results_csv([], test_cases)
-            st.download_button("📤 Export Test Cases", csv_export,
+            st.download_button("Export Test Cases", csv_export,
                              file_name="test_cases.csv", mime="text/csv")
 
     if uploaded:
@@ -119,7 +119,7 @@ with tab_data:
     st.markdown("")
 
     # Add manually
-    with st.expander("➕ Add Test Case Manually"):
+    with st.expander("Add Test Case Manually"):
         with st.form("add_tc_form"):
             tc_input = st.text_area("Input Data", height=80, placeholder="Enter test input...")
             tc_expected = st.text_area("Expected Output (optional)", height=60)
@@ -144,7 +144,7 @@ with tab_data:
                 st.text_area("Input", tc["input_data"], height=60, disabled=True, key=f"tc_v_in_{i}")
                 if tc.get("expected_output"):
                     st.text_area("Expected", tc["expected_output"], height=60, disabled=True, key=f"tc_v_exp_{i}")
-                if st.button("🗑 Delete", key=f"del_tc_{tc['id']}"):
+                if st.button("Delete", key=f"del_tc_{tc['id']}"):
                     db.delete_test_case(tc["id"])
                     st.rerun()
     else:
@@ -161,7 +161,7 @@ with tab_config:
                      index=0, horizontal=True)
 
     if method in ("llm_judge", "combined"):
-        st.caption("⚠ LLM-as-a-Judge scores may vary between runs and are not objective ground truth.")
+        st.caption("Note: LLM-as-a-Judge scores may vary between runs and are not objective ground truth.")
 
     st.markdown("##### Evaluation Weights")
     st.caption("Configure the relative importance of each criterion. Weights are normalized automatically.")
@@ -220,7 +220,7 @@ with tab_results:
 
         # Demo warning
         if any(r.get("is_demo") for r in existing_results):
-            st.caption("⚡ Results include simulated demo evaluations.")
+            st.caption("Results include simulated demo evaluations.")
 
         # Criterion chart
         if agg["criterion_averages"]:
@@ -268,9 +268,9 @@ with tab_results:
 
         ex1, ex2 = st.columns(2)
         with ex1:
-            st.download_button("📥 Export CSV", csv_data, file_name="evaluation_results.csv", mime="text/csv")
+            st.download_button("Export CSV", csv_data, file_name="evaluation_results.csv", mime="text/csv")
         with ex2:
-            st.download_button("📥 Export JSON", json_data, file_name="evaluation_results.json", mime="application/json")
+            st.download_button("Export JSON", json_data, file_name="evaluation_results.json", mime="application/json")
 
         # Detail drill-down
         st.markdown("##### Inspect Individual Results")
@@ -309,7 +309,7 @@ if not test_cases:
 elif total_w == 0:
     st.warning("Fix evaluation weights before running.")
 else:
-    if st.button("▶ Run Evaluation", type="primary", use_container_width=True):
+    if st.button("Run Evaluation", type="primary", use_container_width=True):
         weights = EvaluationWeights(accuracy=w_acc, relevance=w_rel,
                                     instruction_adherence=w_ins, clarity=w_cla,
                                     format_compliance=w_fmt)

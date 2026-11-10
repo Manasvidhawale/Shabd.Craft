@@ -330,9 +330,9 @@ with st.sidebar:
 
     # Mode badge
     if settings.is_demo_mode:
-        st.markdown('<span class="status-badge badge-demo">⚡ Demo Mode</span>', unsafe_allow_html=True)
+        st.markdown('<span class="status-badge badge-demo">Demo Mode</span>', unsafe_allow_html=True)
     else:
-        st.markdown('<span class="status-badge badge-live">● Live Mode</span>', unsafe_allow_html=True)
+        st.markdown('<span class="status-badge badge-live">Live Mode</span>', unsafe_allow_html=True)
 
     st.caption(f"Provider: **{settings.active_provider}** · Model: **{settings.active_model}**")
     st.divider()
@@ -350,13 +350,13 @@ st.markdown("""
 # Quick actions
 col_a, col_b, col_c = st.columns([1, 1, 1])
 with col_a:
-    if st.button("✦ Start Crafting", use_container_width=True, type="primary"):
+    if st.button("Start Crafting", use_container_width=True, type="primary"):
         st.switch_page("pages/1_Prompt_Workshop.py")
 with col_b:
-    if st.button("📚 Prompt Library", use_container_width=True):
+    if st.button("Prompt Library", use_container_width=True):
         st.switch_page("pages/6_Prompt_Library.py")
 with col_c:
-    if st.button("⚙ Settings", use_container_width=True):
+    if st.button("Settings", use_container_width=True):
         st.switch_page("pages/7_Settings.py")
 
 st.markdown("")
@@ -486,8 +486,7 @@ else:
     # Empty state
     st.markdown("")
     st.markdown("""
-    <div style="text-align: center; padding: 3rem 1rem;">
-        <div style="font-size: 3rem; margin-bottom: 1rem;">✦</div>
+    <div style="text-align: center; padding: 2.5rem 1rem 1.5rem;">
         <h3 style="color: var(--text-primary); font-weight: 600;">Welcome to Shabd.Craft</h3>
         <p style="color: var(--text-secondary); max-width: 500px; margin: 0.5rem auto 1.5rem;">
             Start by creating your first prompt experiment. Use the Prompt Workshop to craft,
@@ -498,7 +497,7 @@ else:
 
     c1, c2, c3 = st.columns([1, 2, 1])
     with c2:
-        if st.button("✦ Create Your First Experiment", use_container_width=True, type="primary"):
+        if st.button("Create Your First Experiment", use_container_width=True, type="primary"):
             st.switch_page("pages/1_Prompt_Workshop.py")
 
     # Quick-start templates
@@ -508,18 +507,14 @@ else:
     templates = db.get_prompt_templates(builtin_only=True)
     if templates:
         cols = st.columns(3)
-        icons = {"summarization": "📝", "extraction": "🔍", "sentiment": "💬",
-                 "question_answering": "❓", "email_generation": "✉️",
-                 "classification": "🏷️", "json_generation": "{ }",
-                 "customer_support": "🤝", "data_analysis": "📊", "general": "📄"}
         for i, tmpl in enumerate(templates[:6]):
             with cols[i % 3]:
-                icon = icons.get(tmpl["category"], "📄")
+                cat_label = tmpl["category"].replace("_", " ").upper()
                 st.markdown(f"""
                 <div class="card-surface">
-                    <div style="font-size: 1.5rem; margin-bottom: 0.3rem;">{icon}</div>
-                    <div style="font-weight: 600; color: var(--text-primary); font-size: 0.9rem;">{tmpl['name']}</div>
-                    <div style="color: var(--text-secondary); font-size: 0.78rem; margin-top: 0.2rem;">{tmpl.get('description', '')[:80]}</div>
+                    <div style="font-size: 0.7rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.08em; color: var(--accent-cyan); margin-bottom: 0.35rem;">{cat_label}</div>
+                    <div style="font-weight: 600; color: var(--text-primary); font-size: 0.92rem;">{tmpl['name']}</div>
+                    <div style="color: var(--text-secondary); font-size: 0.78rem; margin-top: 0.25rem;">{tmpl.get('description', '')[:80]}</div>
                 </div>
                 """, unsafe_allow_html=True)
                 if st.button(f"Use Template", key=f"qt_{tmpl['id']}", use_container_width=True):
