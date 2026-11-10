@@ -67,7 +67,7 @@ Prompt engineering is widely practiced but rarely systematic. Most practitioners
 ```
 ┌─────────────────────────────────────────────────────┐
 │                   Streamlit UI                       │
-│  app.py (Dashboard) + pages/ (7 pages)              │
+│  app.py (Navigation Shell) + views/ (8 views)       │
 └────────────────────┬────────────────────────────────┘
                      │
          ┌───────────▼───────────┐
@@ -119,7 +119,8 @@ Shabd.Craft/
 ├── pytest.ini
 ├── README.md
 │
-├── pages/
+├── views/
+│   ├── 0_Home.py                   # Overview dashboard & workflow guide
 │   ├── 1_Prompt_Workshop.py        # Prompt creation, execution & code export
 │   ├── 2_Evaluation_Lab.py         # Batch evaluation & security audit
 │   ├── 3_Prompt_Optimizer.py       # AI-powered optimization

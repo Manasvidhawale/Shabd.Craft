@@ -10,11 +10,11 @@ Shabd.Craft is designed with strict separation of concerns between the UI, busin
 ┌─────────────────────────────────────────────────────────┐
 │                    PRESENTATION LAYER                    │
 │                                                         │
-│  app.py (Unified Home Dashboard & Workflow Guide)       │
-│  pages/1_Prompt_Workshop    pages/5_Experiment_History  │
-│  pages/2_Evaluation_Lab     pages/6_Prompt_Library      │
-│  pages/3_Prompt_Optimizer   pages/7_Settings            │
-│  pages/4_Compare_Versions                               │
+│  app.py (Navigation Shell & Global Theme)               │
+│  views/0_Home               views/4_Compare_Versions    │
+│  views/1_Prompt_Workshop    views/5_Experiment_History  │
+│  views/2_Evaluation_Lab     views/6_Prompt_Library      │
+│  views/3_Prompt_Optimizer   views/7_Settings            │
 │                                                         │
 │  Technology: Streamlit + Plotly + Custom CSS            │
 └────────────────────────┬────────────────────────────────┘

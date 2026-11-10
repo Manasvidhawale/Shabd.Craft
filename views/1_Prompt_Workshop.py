@@ -53,7 +53,7 @@ st.caption("Craft, preview, and execute prompts with different techniques.")
 st.divider()
 
 # ── Command Bar ────────────────────────────────────────────────────────
-bar1, bar2, bar3, bar4 = st.columns([2, 1, 1, 1])
+bar1, bar2, bar3 = st.columns([2, 1, 1])
 with bar1:
     exp_name = st.text_input("Experiment Name", value=st.session_state["ws_exp_name"],
                              placeholder="e.g., Customer Feedback Summarizer v1",
@@ -69,11 +69,6 @@ with bar2:
 with bar3:
     model = st.selectbox("Model", settings.AVAILABLE_MODELS if not settings.is_demo_mode else ["demo-simulator"],
                          index=0)
-with bar4:
-    st.markdown(f"**Provider:** {settings.active_provider}")
-    st.markdown(f"**Status:** {'Ready' if get_provider().is_available() else 'Unavailable'}")
-
-st.markdown("")
 
 # ── Main Layout: Composer + Preview ────────────────────────────────────
 left_col, right_col = st.columns([3, 2])
@@ -86,6 +81,7 @@ with left_col:
     tech = st.selectbox("Select Technique", techniques,
                        format_func=lambda x: technique_labels.get(x, x),
                        index=techniques.index(st.session_state["ws_technique"]),
+                       label_visibility="collapsed",
                        key="sel_technique")
     st.session_state["ws_technique"] = tech
 
@@ -98,14 +94,16 @@ with left_col:
     st.markdown("##### System Instructions")
     system_prompt = st.text_area("System Prompt", value=st.session_state["ws_system"],
                                  height=100, placeholder="You are a helpful assistant...",
+                                 label_visibility="collapsed",
                                  key="ta_system")
     st.session_state["ws_system"] = system_prompt
 
     st.markdown("##### User Prompt Template")
     st.caption("Use `{{variable_name}}` for template variables.")
     user_prompt = st.text_area("User Prompt", value=st.session_state["ws_user"],
-                               height=200,
+                               height=190,
                                placeholder="Summarize the following feedback:\n\n{{customer_feedback}}",
+                               label_visibility="collapsed",
                                key="ta_user")
     st.session_state["ws_user"] = user_prompt
     st.session_state["ws_unsaved"] = True
@@ -313,6 +311,10 @@ if reset_clicked:
     for key in ["ws_system", "ws_user", "ws_sample_input", "ws_expected",
                 "ws_last_response", "ws_exp_name", "ws_few_shots"]:
         st.session_state[key] = "" if isinstance(st.session_state.get(key), str) else ([] if isinstance(st.session_state.get(key), list) else None)
+    st.session_state["ws_technique"] = "zero_shot"
+    st.session_state["ws_format"] = "text"
+    for widget_key in ("ta_system", "ta_user", "sel_technique", "input_exp_name", "ta_sample", "ta_expected"):
+        st.session_state.pop(widget_key, None)
     st.rerun()
 
 if run_clicked:

@@ -41,10 +41,13 @@ exp_opts = {e["id"]: e["name"] for e in experiments}
 default_exp = st.session_state.get("current_experiment_id", experiments[0]["id"])
 if default_exp not in exp_opts:
     default_exp = experiments[0]["id"]
-sel_exp = st.selectbox("Experiment", list(exp_opts.keys()),
-                       format_func=lambda x: exp_opts[x],
-                       index=list(exp_opts.keys()).index(default_exp))
-st.session_state["current_experiment_id"] = sel_exp
+
+sel_c1, sel_c2 = st.columns(2)
+with sel_c1:
+    sel_exp = st.selectbox("Experiment", list(exp_opts.keys()),
+                           format_func=lambda x: exp_opts[x],
+                           index=list(exp_opts.keys()).index(default_exp))
+    st.session_state["current_experiment_id"] = sel_exp
 
 versions = db.get_prompt_versions(sel_exp)
 if not versions:
@@ -55,15 +58,17 @@ ver_opts = {v["id"]: f"v{v['version_number']}: {v['version_label']}" for v in ve
 default_ver = st.session_state.get("current_version_id", versions[0]["id"])
 if default_ver not in ver_opts:
     default_ver = versions[0]["id"]
-sel_ver = st.selectbox("Base Prompt Version", list(ver_opts.keys()),
-                       format_func=lambda x: ver_opts[x],
-                       index=list(ver_opts.keys()).index(default_ver))
-st.session_state["current_version_id"] = sel_ver
+with sel_c2:
+    sel_ver = st.selectbox("Base Prompt Version", list(ver_opts.keys()),
+                           format_func=lambda x: ver_opts[x],
+                           index=list(ver_opts.keys()).index(default_ver))
+    st.session_state["current_version_id"] = sel_ver
 
 ver_data = db.get_prompt_version(sel_ver)
+existing_candidates = db.get_optimization_candidates(sel_exp)
 
-# Show current prompt
-with st.expander("Current Prompt", expanded=True):
+# Show current prompt (collapse automatically once candidates exist)
+with st.expander("Current Prompt", expanded=not bool(existing_candidates)):
     if ver_data.get("system_prompt"):
         st.markdown("**System:**")
         st.code(ver_data["system_prompt"], language="text")

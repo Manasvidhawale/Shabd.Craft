@@ -48,10 +48,12 @@ default_exp = st.session_state.get("current_experiment_id", experiments[0]["id"]
 if default_exp not in exp_options:
     default_exp = experiments[0]["id"]
 
-selected_exp_id = st.selectbox("Select Experiment", list(exp_options.keys()),
-                                format_func=lambda x: exp_options[x],
-                                index=list(exp_options.keys()).index(default_exp))
-st.session_state["current_experiment_id"] = selected_exp_id
+sel_col1, sel_col2 = st.columns(2)
+with sel_col1:
+    selected_exp_id = st.selectbox("Select Experiment", list(exp_options.keys()),
+                                    format_func=lambda x: exp_options[x],
+                                    index=list(exp_options.keys()).index(default_exp))
+    st.session_state["current_experiment_id"] = selected_exp_id
 
 versions = db.get_prompt_versions(selected_exp_id)
 if not versions:
@@ -62,10 +64,11 @@ ver_options = {v["id"]: f"v{v['version_number']}: {v['version_label']}" for v in
 default_ver = st.session_state.get("current_version_id", versions[0]["id"])
 if default_ver not in ver_options:
     default_ver = versions[0]["id"]
-selected_ver_id = st.selectbox("Select Prompt Version", list(ver_options.keys()),
-                                format_func=lambda x: ver_options[x],
-                                index=list(ver_options.keys()).index(default_ver))
-st.session_state["current_version_id"] = selected_ver_id
+with sel_col2:
+    selected_ver_id = st.selectbox("Select Prompt Version", list(ver_options.keys()),
+                                    format_func=lambda x: ver_options[x],
+                                    index=list(ver_options.keys()).index(default_ver))
+    st.session_state["current_version_id"] = selected_ver_id
 
 st.markdown("")
 
