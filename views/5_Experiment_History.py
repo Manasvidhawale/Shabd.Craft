@@ -11,18 +11,11 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 import streamlit as st
 import json
 import pandas as pd
-from src.config import settings
-from src.database import Database
+from src.ui_helpers import get_database
 from src.experiment_service import duplicate_experiment, get_experiment_summary
 from src.export_service import export_results_csv, export_results_json
 
-st.set_page_config(page_title="Experiment History — Shabd.Craft", page_icon="✦", layout="wide")
-
-@st.cache_resource
-def get_db():
-    return Database(settings.db_path)
-
-db = get_db()
+db = get_database()
 
 st.markdown("## Experiment History")
 st.caption("View, manage, and export your prompt engineering experiments.")
@@ -33,7 +26,7 @@ experiments = db.list_experiments(limit=100)
 if not experiments:
     st.info("No experiments yet. Start by creating one in the Prompt Workshop.")
     if st.button("Go to Prompt Workshop", type="primary"):
-        st.switch_page("pages/1_Prompt_Workshop.py")
+        st.switch_page("views/1_Prompt_Workshop.py")
     st.stop()
 
 # ── Search & Filter ────────────────────────────────────────────────────
@@ -88,13 +81,13 @@ for exp in filtered:
         with a1:
             if st.button("Evaluate", key=f"eval_{exp['id']}"):
                 st.session_state["current_experiment_id"] = exp["id"]
-                st.switch_page("pages/2_Evaluation_Lab.py")
+                st.switch_page("views/2_Evaluation_Lab.py")
 
         with a2:
             if len(versions) >= 2:
                 if st.button("Compare", key=f"cmp_{exp['id']}"):
                     st.session_state["current_experiment_id"] = exp["id"]
-                    st.switch_page("pages/4_Compare_Versions.py")
+                    st.switch_page("views/4_Compare_Versions.py")
 
         with a3:
             if st.button("Duplicate", key=f"dup_{exp['id']}"):

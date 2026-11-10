@@ -13,7 +13,7 @@ import json
 import pandas as pd
 import plotly.graph_objects as go
 from src.config import settings
-from src.database import Database
+from src.ui_helpers import get_database
 from src.schemas import (
     PromptVersion, TestCase, EvaluationWeights, EvaluationResult,
     EvaluationMethod, PromptingTechnique, OutputFormat, FewShotExample,
@@ -27,19 +27,10 @@ from src.export_service import (
     export_results_csv, export_results_json, parse_test_cases_csv, parse_test_cases_json,
 )
 
-st.set_page_config(page_title="Evaluation Lab — Shabd.Craft", page_icon="✦", layout="wide")
-
-@st.cache_resource
-def get_db():
-    return Database(settings.db_path)
-
-db = get_db()
+db = get_database()
 
 st.markdown("## Evaluation Lab")
 st.caption("Test prompts against datasets and measure performance with systematic evaluation.")
-
-if settings.is_demo_mode:
-    st.markdown('<span style="display:inline-block;padding:3px 10px;border-radius:20px;font-size:0.72rem;font-weight:600;background:rgba(251,191,36,0.15);color:#fbbf24;border:1px solid rgba(251,191,36,0.3);">Demo Mode — evaluations are simulated</span>', unsafe_allow_html=True)
 
 st.divider()
 
@@ -49,7 +40,7 @@ experiments = db.list_experiments()
 if not experiments:
     st.info("No experiments found. Create one in the **Prompt Workshop** first.")
     if st.button("Go to Prompt Workshop", type="primary"):
-        st.switch_page("pages/1_Prompt_Workshop.py")
+        st.switch_page("views/1_Prompt_Workshop.py")
     st.stop()
 
 exp_options = {e["id"]: f"{e['name']} ({e['category']})" for e in experiments}

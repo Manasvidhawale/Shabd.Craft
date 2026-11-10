@@ -11,8 +11,6 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 import streamlit as st
 from src.config import settings
 
-st.set_page_config(page_title="Settings — Shabd.Craft", page_icon="✦", layout="wide")
-
 st.markdown("## Settings & Configuration")
 st.caption("Configure providers, evaluation defaults, and execution limits.")
 st.divider()

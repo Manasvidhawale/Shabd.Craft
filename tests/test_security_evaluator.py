@@ -122,3 +122,4 @@ class TestHardenAndRunAudit:
         strong_report = run_security_audit(hardened)
         assert strong_report["robustness_score"] == 100.0
         assert strong_report["static_audit"]["static_score"] == 100.0
+

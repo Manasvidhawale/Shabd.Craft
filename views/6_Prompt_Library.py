@@ -10,20 +10,13 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 
 import streamlit as st
 import json
-from src.config import settings
-from src.database import Database
+from src.ui_helpers import get_database, load_template_into_workshop
 from src.schemas import (
     PromptTemplate, FewShotExample, TaskCategory,
     PromptingTechnique, OutputFormat, _now,
 )
 
-st.set_page_config(page_title="Prompt Library — Shabd.Craft", page_icon="✦", layout="wide")
-
-@st.cache_resource
-def get_db():
-    return Database(settings.db_path)
-
-db = get_db()
+db = get_database()
 
 st.markdown("## Prompt Library")
 st.caption("Browse, search, and manage reusable prompt templates.")
@@ -94,15 +87,8 @@ with tab_browse:
                     bc1, bc2, bc3 = st.columns(3)
                     with bc1:
                         if st.button("Use", key=f"use_{tmpl['id']}"):
-                            st.session_state["prompt_system"] = tmpl.get("system_prompt", "")
-                            st.session_state["prompt_user"] = tmpl["user_prompt_template"]
-                            st.session_state["prompt_technique"] = tmpl.get("technique", "zero_shot")
-                            st.session_state["prompt_output_format"] = tmpl.get("output_format", "text")
-                            st.session_state["ws_system"] = tmpl.get("system_prompt", "")
-                            st.session_state["ws_user"] = tmpl["user_prompt_template"]
-                            st.session_state["ws_technique"] = tmpl.get("technique", "zero_shot")
-                            st.session_state["ws_format"] = tmpl.get("output_format", "text")
-                            st.switch_page("pages/1_Prompt_Workshop.py")
+                            load_template_into_workshop(tmpl)
+                            st.switch_page("views/1_Prompt_Workshop.py")
                     with bc2:
                         if st.button("Preview", key=f"prev_{tmpl['id']}"):
                             st.session_state[f"preview_{tmpl['id']}"] = True

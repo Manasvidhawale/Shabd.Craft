@@ -298,3 +298,4 @@ def run_security_audit(
         "static_audit": static_audit,
         "is_demo": any_demo,
     }
+

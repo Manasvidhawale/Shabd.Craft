@@ -37,3 +37,4 @@ class TestCompareVersions:
         comp = compare_versions(va, vb, ra, rb)
         assert comp.winner == "b"
         assert comp.version_b_overall == 85.0
+

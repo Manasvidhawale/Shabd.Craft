@@ -13,7 +13,7 @@ import json
 import pandas as pd
 import plotly.graph_objects as go
 from src.config import settings
-from src.database import Database
+from src.ui_helpers import get_database
 from src.schemas import (
     PromptVersion, TestCase, EvaluationWeights, EvaluationResult,
     EvaluationMethod, ExecutionStatus, PromptingTechnique, OutputFormat,
@@ -22,19 +22,10 @@ from src.schemas import (
 from src.optimizer import generate_candidates, recommend_best
 from src.evaluation_engine import evaluate_batch, aggregate_results
 
-st.set_page_config(page_title="Prompt Optimizer — Shabd.Craft", page_icon="✦", layout="wide")
-
-@st.cache_resource
-def get_db():
-    return Database(settings.db_path)
-
-db = get_db()
+db = get_database()
 
 st.markdown("## Prompt Optimizer")
 st.caption("Generate improved prompt candidates, test them, and compare results.")
-
-if settings.is_demo_mode:
-    st.markdown('<span style="display:inline-block;padding:3px 10px;border-radius:20px;font-size:0.72rem;font-weight:600;background:rgba(251,191,36,0.15);color:#fbbf24;border:1px solid rgba(251,191,36,0.3);">Demo Mode — optimization uses simulated responses</span>', unsafe_allow_html=True)
 
 st.divider()
 
@@ -43,7 +34,7 @@ experiments = db.list_experiments()
 if not experiments:
     st.info("Create and evaluate an experiment first.")
     if st.button("Go to Prompt Workshop", type="primary"):
-        st.switch_page("pages/1_Prompt_Workshop.py")
+        st.switch_page("views/1_Prompt_Workshop.py")
     st.stop()
 
 exp_opts = {e["id"]: e["name"] for e in experiments}

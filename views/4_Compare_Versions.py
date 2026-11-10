@@ -12,19 +12,12 @@ import streamlit as st
 import json
 import pandas as pd
 import plotly.graph_objects as go
-from src.config import settings
-from src.database import Database
+from src.ui_helpers import get_database
 from src.comparison_engine import (
     compare_versions, get_side_by_side_outputs, build_word_diff_html,
 )
 
-st.set_page_config(page_title="Compare Versions — Shabd.Craft", page_icon="✦", layout="wide")
-
-@st.cache_resource
-def get_db():
-    return Database(settings.db_path)
-
-db = get_db()
+db = get_database()
 
 st.markdown("## Compare Versions")
 st.caption("Side-by-side comparison of prompt versions with shared test cases.")

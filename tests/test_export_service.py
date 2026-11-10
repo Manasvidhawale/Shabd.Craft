@@ -34,3 +34,4 @@ class TestGenerateProductionCode:
         )
         assert "demo-simulator" not in snippets["openai_python"]
         assert "gpt-3.5-turbo" in snippets["openai_python"]
+

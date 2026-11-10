@@ -12,7 +12,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 import streamlit as st
 import json
 from src.config import settings
-from src.database import Database
+from src.ui_helpers import get_database
 from src.schemas import (
     PromptVersion, Experiment, FewShotExample, TestCase,
     PromptingTechnique, TaskCategory, OutputFormat, ExecutionStatus,
@@ -25,13 +25,7 @@ from src.template_engine import extract_variables, preview_template, validate_te
 from src.experiment_service import create_experiment_with_version
 from src.export_service import generate_production_code
 
-st.set_page_config(page_title="Prompt Workshop — Shabd.Craft", page_icon="✦", layout="wide")
-
-@st.cache_resource
-def get_db():
-    return Database(settings.db_path)
-
-db = get_db()
+db = get_database()
 
 # ── Session defaults ───────────────────────────────────────────────────
 for key, default in [
@@ -55,10 +49,6 @@ for key, default in [
 # ── Header ─────────────────────────────────────────────────────────────
 st.markdown("## Prompt Workshop")
 st.caption("Craft, preview, and execute prompts with different techniques.")
-
-# Mode indicator
-if settings.is_demo_mode:
-    st.markdown('<span class="status-badge badge-demo" style="display:inline-block;padding:3px 10px;border-radius:20px;font-size:0.72rem;font-weight:600;background:rgba(251,191,36,0.15);color:#fbbf24;border:1px solid rgba(251,191,36,0.3);">Demo Mode — responses are simulated</span>', unsafe_allow_html=True)
 
 st.divider()
 
@@ -398,4 +388,4 @@ if eval_clicked:
     if not st.session_state.get("current_experiment_id"):
         st.warning("Save the experiment first before sending to Evaluation Lab.")
     else:
-        st.switch_page("pages/2_Evaluation_Lab.py")
+        st.switch_page("views/2_Evaluation_Lab.py")
