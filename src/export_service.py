@@ -178,3 +178,76 @@ def _clean_for_export(data: dict) -> dict:
             except (json.JSONDecodeError, TypeError):
                 pass
     return cleaned
+
+
+def generate_production_code(
+    system_prompt: str,
+    user_prompt: str,
+    model: str = "gpt-3.5-turbo",
+    temperature: float = 0.7,
+    max_tokens: int = 1024,
+) -> dict[str, str]:
+    """
+    Generate ready-to-run code snippets (OpenAI SDK, LangChain, cURL)
+    for a crafted prompt.
+    """
+    resolved_model = "gpt-3.5-turbo" if model == "demo-simulator" else (model or "gpt-3.5-turbo")
+    sys_lit = json.dumps(system_prompt or "You are a helpful assistant.")
+    usr_lit = json.dumps(user_prompt or "")
+
+    openai_python = (
+        "import os\n"
+        "from openai import OpenAI\n\n"
+        "client = OpenAI(api_key=os.environ.get(\"OPENAI_API_KEY\"))\n\n"
+        f"system_prompt = {sys_lit}\n"
+        f"user_prompt = {usr_lit}\n\n"
+        "response = client.chat.completions.create(\n"
+        f"    model={json.dumps(resolved_model)},\n"
+        f"    temperature={temperature},\n"
+        f"    max_tokens={max_tokens},\n"
+        "    messages=[\n"
+        "        {\"role\": \"system\", \"content\": system_prompt},\n"
+        "        {\"role\": \"user\", \"content\": user_prompt},\n"
+        "    ],\n"
+        ")\n\n"
+        "print(response.choices[0].message.content)\n"
+    )
+
+    langchain_python = (
+        "from langchain_openai import ChatOpenAI\n"
+        "from langchain_core.messages import SystemMessage, HumanMessage\n\n"
+        "llm = ChatOpenAI(\n"
+        f"    model={json.dumps(resolved_model)},\n"
+        f"    temperature={temperature},\n"
+        f"    max_tokens={max_tokens},\n"
+        ")\n\n"
+        "messages = [\n"
+        f"    SystemMessage(content={sys_lit}),\n"
+        f"    HumanMessage(content={usr_lit}),\n"
+        "]\n\n"
+        "result = llm.invoke(messages)\n"
+        "print(result.content)\n"
+    )
+
+    payload = json.dumps({
+        "model": resolved_model,
+        "temperature": temperature,
+        "max_tokens": max_tokens,
+        "messages": [
+            {"role": "system", "content": system_prompt or "You are a helpful assistant."},
+            {"role": "user", "content": user_prompt or ""},
+        ],
+    }, indent=2)
+
+    curl_cmd = (
+        "curl https://api.openai.com/v1/chat/completions \\\n"
+        "  -H \"Content-Type: application/json\" \\\n"
+        "  -H \"Authorization: Bearer $OPENAI_API_KEY\" \\\n"
+        f"  -d '{payload}'"
+    )
+
+    return {
+        "openai_python": openai_python,
+        "langchain_python": langchain_python,
+        "curl": curl_cmd,
+    }

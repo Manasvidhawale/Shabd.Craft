@@ -23,6 +23,7 @@ from src.prompt_engine import (
 )
 from src.template_engine import extract_variables, preview_template, validate_template
 from src.experiment_service import create_experiment_with_version
+from src.export_service import generate_production_code
 
 st.set_page_config(page_title="Prompt Workshop — Shabd.Craft", page_icon="✦", layout="wide")
 
@@ -169,86 +170,136 @@ with left_col:
                             key="ta_expected")
     st.session_state["ws_expected"] = expected
 
-# ── Right Pane: Preview & Results ──────────────────────────────────────
+# ── Right Pane: Preview, Results & Export ──────────────────────────────
 with right_col:
-    st.markdown("##### Live Preview")
+    tab_preview, tab_export = st.tabs(["Preview & Results", "Export Code"])
 
-    # Template validation
-    if user_prompt:
-        validation = validate_template(user_prompt)
-        variables = validation["variables"]
+    with tab_preview:
+        st.markdown("##### Live Preview")
 
-        if variables:
-            st.caption(f"Template variables: `{'`, `'.join(variables)}`")
+        # Template validation
+        if user_prompt:
+            validation = validate_template(user_prompt)
+            variables = validation["variables"]
 
-        if validation["warnings"]:
-            for w in validation["warnings"]:
-                st.warning(w)
+            if variables:
+                st.caption(f"Template variables: `{'`, `'.join(variables)}`")
 
-        # Preview with sample data
-        var_values = {}
-        if sample_input:
-            for v in variables:
-                var_values[v] = sample_input
+            if validation["warnings"]:
+                for w in validation["warnings"]:
+                    st.warning(w)
 
-        rendered = preview_template(user_prompt, var_values)
+            # Preview with sample data
+            var_values = {}
+            if sample_input:
+                for v in variables:
+                    var_values[v] = sample_input
 
-        st.markdown("**Rendered Prompt:**")
-        st.code(rendered[:2000], language="text")
+            rendered = preview_template(user_prompt, var_values)
 
-        # Word & char counts
-        wc = len(rendered.split())
-        cc = len(rendered)
-        st.caption(f"Words: {wc} · Characters: {cc}")
-    else:
-        st.info("Enter a prompt template to see the preview.")
+            st.markdown("**Rendered Prompt:**")
+            st.code(rendered[:2000], language="text")
 
-    # Prompt analysis
-    if user_prompt:
-        st.markdown("##### Prompt Analysis")
-        issues = []
-        if not system_prompt:
-            issues.append("No system prompt — consider adding role/context instructions.")
-        if len(user_prompt) < 20:
-            issues.append("Very short prompt — may lack specificity.")
-        if "{{" not in user_prompt and tech == "zero_shot":
-            issues.append("No template variables — prompt will be static.")
-        if fmt == "json" and "json" not in user_prompt.lower():
-            issues.append("JSON output selected but not mentioned in prompt.")
-        if tech == "role_based" and (not system_prompt.strip() or system_prompt.strip().lower() == "you are a helpful assistant."):
-            issues.append("Role-based selected with a generic or empty system prompt — define a specific expert role and domain.")
-        if tech == "structured_output" and not any(kw in user_prompt.lower() for kw in ["json", "field", "schema", "format", "key", "column"]):
-            issues.append("Structured output selected — specify the expected fields or output schema in the prompt.")
-        if not any(kw in user_prompt.lower() for kw in ["step", "1.", "first", "then", "finally"]):
-            if tech == "task_decomposition":
-                issues.append("No explicit steps detected — a default 3-step decomposition scaffold will be prepended automatically.")
-
-        if issues:
-            for issue in issues:
-                st.markdown(f"- {issue}")
+            # Word & char counts
+            wc = len(rendered.split())
+            cc = len(rendered)
+            st.caption(f"Words: {wc} · Characters: {cc}")
         else:
-            st.success("Prompt looks well-structured.")
+            st.info("Enter a prompt template to see the preview.")
 
-    st.divider()
+        # Prompt analysis
+        if user_prompt:
+            st.markdown("##### Prompt Analysis")
+            issues = []
+            if not system_prompt:
+                issues.append("No system prompt — consider adding role/context instructions.")
+            if len(user_prompt) < 20:
+                issues.append("Very short prompt — may lack specificity.")
+            if "{{" not in user_prompt and tech == "zero_shot":
+                issues.append("No template variables — prompt will be static.")
+            if fmt == "json" and "json" not in user_prompt.lower():
+                issues.append("JSON output selected but not mentioned in prompt.")
+            if tech == "role_based" and (not system_prompt.strip() or system_prompt.strip().lower() == "you are a helpful assistant."):
+                issues.append("Role-based selected with a generic or empty system prompt — define a specific expert role and domain.")
+            if tech == "structured_output" and not any(kw in user_prompt.lower() for kw in ["json", "field", "schema", "format", "key", "column"]):
+                issues.append("Structured output selected — specify the expected fields or output schema in the prompt.")
+            if not any(kw in user_prompt.lower() for kw in ["step", "1.", "first", "then", "finally"]):
+                if tech == "task_decomposition":
+                    issues.append("No explicit steps detected — a default 3-step decomposition scaffold will be prepended automatically.")
 
-    # Execution results
-    if st.session_state.get("ws_last_response"):
-        resp = st.session_state["ws_last_response"]
-        st.markdown("##### Execution Result")
+            if issues:
+                for issue in issues:
+                    st.markdown(f"- {issue}")
+            else:
+                st.success("Prompt looks well-structured.")
 
-        if resp.get("is_demo"):
-            st.caption("Simulated demo response")
+        st.divider()
 
-        st.text_area("Generated Output", value=resp.get("content", ""),
-                     height=200, disabled=True, key="result_output")
+        # Execution results
+        if st.session_state.get("ws_last_response"):
+            resp = st.session_state["ws_last_response"]
+            st.markdown("##### Execution Result")
 
-        rc1, rc2, rc3 = st.columns(3)
-        rc1.metric("Latency", f"{resp.get('latency_ms', 0):.0f}ms")
-        rc2.metric("Tokens", resp.get("total_tokens", 0))
-        if resp.get("cost_estimate", 0) > 0:
-            rc3.metric("Cost", f"${resp['cost_estimate']:.5f}")
+            if resp.get("is_demo"):
+                st.caption("Simulated demo response")
+
+            st.text_area("Generated Output", value=resp.get("content", ""),
+                         height=200, disabled=True, key="result_output")
+
+            rc1, rc2, rc3 = st.columns(3)
+            rc1.metric("Latency", f"{resp.get('latency_ms', 0):.0f}ms")
+            rc2.metric("Tokens", resp.get("total_tokens", 0))
+            if resp.get("cost_estimate", 0) > 0:
+                rc3.metric("Cost", f"${resp['cost_estimate']:.5f}")
+            else:
+                rc3.metric("Cost", "—" if resp.get("is_demo") else "$0.00")
+
+    with tab_export:
+        st.markdown("##### Export Production Code")
+        st.caption("Copy-pasteable API integration snippets for your current prompt configuration.")
+
+        if not user_prompt.strip():
+            st.info("Enter a user prompt template on the left to generate code snippets.")
         else:
-            rc3.metric("Cost", "—" if resp.get("is_demo") else "$0.00")
+            few_shots_export = []
+            if tech in ("one_shot", "few_shot"):
+                for ex in st.session_state.get("ws_few_shots", []):
+                    if ex.get("input_text") and ex.get("output_text"):
+                        few_shots_export.append(FewShotExample(**ex))
+
+            export_ver = PromptVersion(
+                experiment_id="export",
+                system_prompt=system_prompt,
+                user_prompt_template=user_prompt,
+                technique=PromptingTechnique(tech),
+                output_format=OutputFormat(fmt),
+                model_name=model,
+                temperature=temp,
+                max_tokens=max_tok,
+                few_shot_examples=few_shots_export,
+            )
+            built_sys, built_user = construct_prompt(export_ver, input_data=sample_input)
+            snippets = generate_production_code(
+                system_prompt=built_sys,
+                user_prompt=built_user,
+                model=model,
+                temperature=temp,
+                max_tokens=max_tok,
+            )
+
+            fmt_choice = st.radio(
+                "Target Format",
+                ["openai_python", "langchain_python", "curl"],
+                format_func=lambda x: {
+                    "openai_python": "Python (OpenAI SDK)",
+                    "langchain_python": "Python (LangChain)",
+                    "curl": "cURL (REST API)",
+                }[x],
+                horizontal=True,
+                key="export_fmt_radio",
+            )
+            lang = "bash" if fmt_choice == "curl" else "python"
+            st.code(snippets[fmt_choice], language=lang)
 
 # ── Action Buttons ─────────────────────────────────────────────────────
 st.divider()
