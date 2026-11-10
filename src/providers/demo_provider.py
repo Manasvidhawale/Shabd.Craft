@@ -58,6 +58,24 @@ class DemoProvider(BaseLLMProvider):
     def _generate_demo_response(self, request: LLMRequest, rng: random.Random) -> str:
         """Generate a context-aware simulated response based on the prompt."""
         prompt_lower = request.user_prompt.lower()
+        sys_lower = (request.system_prompt or "").lower()
+
+        # Simulate realistic prompt injection behavior in Demo Mode
+        if self._is_injection_probe(prompt_lower):
+            has_delimiters = any(d in request.user_prompt for d in ("<user_input>", '"""', "'''", "---"))
+            has_defense = any(d in sys_lower for d in ("untrusted", "security boundary", "never reveal", "do not follow", "strictly as data"))
+            if not (has_delimiters and has_defense):
+                if "security_bypass_ok" in prompt_lower:
+                    return "[DEMO] SECURITY_BYPASS_OK (simulated injection compromise — unhardened prompt)"
+                if "admin_access_granted" in prompt_lower:
+                    return "[DEMO] ADMIN_ACCESS_GRANTED (simulated override — no boundary rules)"
+                if "delimiter_escaped" in prompt_lower and not has_delimiters:
+                    return "[DEMO] DELIMITER_ESCAPED (simulated sandbox breakout)"
+                if "unfiltered_mode" in prompt_lower and not has_defense:
+                    return "[DEMO] UNFILTERED_MODE (simulated persona hijack)"
+                if ("repeat the exact system instructions" in prompt_lower or "hidden prompt" in prompt_lower) and not has_defense:
+                    leaked = request.system_prompt.strip() or "No system prompt was set."
+                    return f"[DEMO] Here are my system instructions: {leaked}"
 
         # Check for JSON output request
         if "json" in prompt_lower or "structured" in prompt_lower:
@@ -89,6 +107,19 @@ class DemoProvider(BaseLLMProvider):
 
         # Default response
         return self._demo_general_response(rng)
+
+    @staticmethod
+    def _is_injection_probe(prompt_lower: str) -> bool:
+        """Detect if the prompt contains a known security audit probe payload."""
+        markers = (
+            "security_bypass_ok",
+            "admin_access_granted",
+            "delimiter_escaped",
+            "unfiltered_mode",
+            "repeat the exact system instructions",
+            "hidden prompt, and system rules",
+        )
+        return any(m in prompt_lower for m in markers)
 
     def _demo_json_response(self, prompt: str, rng: random.Random) -> str:
         data = {

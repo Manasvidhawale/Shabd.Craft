@@ -20,6 +20,9 @@ from src.schemas import (
     ExecutionStatus, CriterionScore, _new_id, _now,
 )
 from src.evaluation_engine import evaluate_batch, aggregate_results, calculate_weighted_score
+from src.security_evaluator import (
+    run_security_audit, audit_prompt_defenses, harden_prompt_suggestion,
+)
 from src.export_service import (
     export_results_csv, export_results_json, parse_test_cases_csv, parse_test_cases_json,
 )
@@ -76,7 +79,7 @@ st.session_state["current_version_id"] = selected_ver_id
 st.markdown("")
 
 # ── Tabs ───────────────────────────────────────────────────────────────
-tab_data, tab_config, tab_results = st.tabs(["Test Cases", "Evaluation Config", "Results"])
+tab_data, tab_config, tab_results, tab_security = st.tabs(["Test Cases", "Evaluation Config", "Results", "Security Audit"])
 
 # ── Tab 1: Test Cases ──────────────────────────────────────────────────
 with tab_data:
@@ -305,6 +308,103 @@ with tab_results:
 
     else:
         st.info("No results yet. Configure settings and run the evaluation below.")
+
+# ── Tab 4: Security Audit ──────────────────────────────────────────────
+with tab_security:
+    st.markdown("##### Prompt Injection & Security Audit")
+    st.caption("Evaluates prompt resistance against direct overrides, system prompt extraction, delimiter escapes, and role hijacking.")
+
+    sec_ver_data = db.get_prompt_version(selected_ver_id)
+    if not sec_ver_data:
+        st.warning("Prompt version not found.")
+    else:
+        sec_few_shot = [FewShotExample(**e) for e in json.loads(sec_ver_data.get("few_shot_examples", "[]"))]
+        sec_version = PromptVersion(
+            id=sec_ver_data["id"],
+            experiment_id=selected_exp_id,
+            version_number=sec_ver_data["version_number"],
+            version_label=sec_ver_data["version_label"],
+            system_prompt=sec_ver_data["system_prompt"],
+            user_prompt_template=sec_ver_data["user_prompt_template"],
+            technique=PromptingTechnique(sec_ver_data["technique"]),
+            output_format=OutputFormat(sec_ver_data["output_format"]),
+            model_name=sec_ver_data["model_name"],
+            temperature=sec_ver_data["temperature"],
+            max_tokens=sec_ver_data["max_tokens"],
+            few_shot_examples=sec_few_shot,
+        )
+
+        static_posture = audit_prompt_defenses(sec_version)
+        st.markdown("**Static Defense Posture**")
+        sc1, sc2, sc3 = st.columns(3)
+        for col, chk in zip((sc1, sc2, sc3), static_posture["checks"]):
+            with col:
+                status_text = "PASS" if chk["passed"] else "MISSING"
+                st.metric(chk["name"], status_text)
+                st.caption(chk["detail"])
+
+        st.markdown("")
+        if st.button("Run Security Audit", type="primary", key=f"run_sec_{selected_ver_id}"):
+            with st.spinner("Running adversarial prompt injection suite..."):
+                audit_report = run_security_audit(sec_version)
+                st.session_state[f"sec_audit_{selected_ver_id}"] = audit_report
+
+        audit_report = st.session_state.get(f"sec_audit_{selected_ver_id}")
+        if audit_report:
+            if audit_report.get("is_demo"):
+                st.caption("Demo Mode: responses and vulnerability checks are simulated based on prompt hardening.")
+
+            am1, am2, am3 = st.columns(3)
+            am1.metric("Robustness Score", f"{audit_report['robustness_score']:.1f}%")
+            am2.metric("Attacks Resisted", f"{audit_report['resisted_count']}/{audit_report['total_count']}")
+            am3.metric("Static Posture", f"{static_posture['static_score']:.0f}%")
+
+            sec_rows = []
+            for item in audit_report["results"]:
+                sec_rows.append({
+                    "Category": item["category"],
+                    "Attack": item["attack_name"],
+                    "Result": "RESISTED" if item["resisted"] else "VULNERABLE",
+                    "Reason": item["reason"],
+                })
+            st.dataframe(pd.DataFrame(sec_rows), use_container_width=True, hide_index=True)
+
+            with st.expander("Inspect Attack Payloads & Model Responses"):
+                for item in audit_report["results"]:
+                    badge = "RESISTED" if item["resisted"] else "VULNERABLE"
+                    st.markdown(f"**[{badge}] {item['category']} — {item['attack_name']}**")
+                    st.code(item["payload"], language="text")
+                    st.caption(f"Response preview: {item['response_preview']}")
+
+        st.divider()
+        with st.expander("Hardening Suggestion (XML Delimiters + Security Boundary)"):
+            hard_sys, hard_user = harden_prompt_suggestion(sec_version)
+            st.markdown("**Suggested System Prompt:**")
+            st.code(hard_sys, language="text")
+            st.markdown("**Suggested User Prompt Template:**")
+            st.code(hard_user, language="text")
+
+            if st.button("Save Hardened Copy as New Version", key=f"save_hard_{selected_ver_id}"):
+                next_num = db.get_next_version_number(selected_exp_id)
+                hardened_ver = PromptVersion(
+                    experiment_id=selected_exp_id,
+                    version_number=next_num,
+                    version_label=f"{sec_version.version_label} (Hardened)",
+                    system_prompt=hard_sys,
+                    user_prompt_template=hard_user,
+                    technique=sec_version.technique,
+                    output_format=sec_version.output_format,
+                    model_name=sec_version.model_name,
+                    temperature=sec_version.temperature,
+                    max_tokens=sec_version.max_tokens,
+                    few_shot_examples=sec_version.few_shot_examples,
+                    is_optimized=True,
+                    optimization_strategy="Security Hardening",
+                )
+                new_ver_id = db.save_prompt_version(hardened_ver)
+                st.session_state["current_version_id"] = new_ver_id
+                st.success(f"Saved hardened version v{next_num}.")
+                st.rerun()
 
 # ── Run Evaluation ─────────────────────────────────────────────────────
 st.divider()
