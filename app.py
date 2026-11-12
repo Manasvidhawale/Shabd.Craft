@@ -77,6 +77,26 @@ section[data-testid="stSidebar"] {
     margin: 0.4rem 0 !important;
 }
 
+section[data-testid="stSidebar"] details[data-testid="stExpander"] {
+    background: transparent !important;
+    border: none !important;
+    margin-bottom: 0.2rem;
+}
+
+section[data-testid="stSidebar"] details[data-testid="stExpander"] summary {
+    padding: 0.35rem 0.4rem !important;
+    font-size: 0.8rem !important;
+    font-weight: 600 !important;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    color: var(--text-secondary) !important;
+}
+
+section[data-testid="stSidebar"] [data-testid="stPageLink-NavLink"] {
+    padding: 0.35rem 0.65rem !important;
+    border-radius: 8px !important;
+}
+
 /* Metric cards */
 div[data-testid="stMetric"] {
     background: var(--bg-card);
@@ -297,19 +317,27 @@ get_database()
 # ── Top-left Brand Logo & Navigation ───────────────────────────────────
 st.logo(str(_ASSETS_DIR / "logo.svg"), icon_image=str(_ASSETS_DIR / "icon.svg"))
 
-pg = st.navigation({
-    "Workflow": [
-        st.Page("views/0_Home.py", title="Home", default=True),
-        st.Page("views/1_Prompt_Workshop.py", title="Prompt Workshop"),
-        st.Page("views/2_Evaluation_Lab.py", title="Evaluation Lab"),
-        st.Page("views/3_Prompt_Optimizer.py", title="Prompt Optimizer"),
-        st.Page("views/4_Compare_Versions.py", title="Compare Versions"),
-    ],
-    "Manage": [
-        st.Page("views/5_Experiment_History.py", title="Experiment History"),
-        st.Page("views/6_Prompt_Library.py", title="Prompt Library"),
-        st.Page("views/7_Settings.py", title="Settings"),
-    ],
-})
+workflow_pages = [
+    st.Page("views/0_Home.py", title="Home", default=True),
+    st.Page("views/1_Prompt_Workshop.py", title="Prompt Workshop"),
+    st.Page("views/2_Evaluation_Lab.py", title="Evaluation Lab"),
+    st.Page("views/3_Prompt_Optimizer.py", title="Prompt Optimizer"),
+    st.Page("views/4_Compare_Versions.py", title="Compare Versions"),
+]
+manage_pages = [
+    st.Page("views/5_Experiment_History.py", title="Experiment History"),
+    st.Page("views/6_Prompt_Library.py", title="Prompt Library"),
+    st.Page("views/7_Settings.py", title="Settings"),
+]
+
+pg = st.navigation(workflow_pages + manage_pages, position="hidden")
+
+with st.sidebar:
+    with st.expander("Workflow", expanded=True):
+        for p in workflow_pages:
+            st.page_link(p, label=p.title)
+    with st.expander("Manage", expanded=True):
+        for p in manage_pages:
+            st.page_link(p, label=p.title)
 
 pg.run()
