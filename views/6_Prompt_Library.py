@@ -205,9 +205,17 @@ with tab_browse:
 with tab_create:
     st.markdown("##### Add New Prompt")
 
+    if st.session_state.pop("lib_reset_create_form", False):
+        for k in ("ct_name", "ct_desc", "ct_system", "ct_user", "ct_example_in", "ct_example_out"):
+            st.session_state[k] = ""
+
+    created_msg = st.session_state.pop("lib_created_msg", None)
+    if created_msg:
+        st.success(created_msg)
+
     with st.form("create_template"):
-        ct_name = st.text_input("Prompt Name", placeholder="e.g., Support Ticket Classifier")
-        ct_desc = st.text_area("Description", height=60, placeholder="What does this prompt do?")
+        ct_name = st.text_input("Prompt Name", placeholder="e.g., Support Ticket Classifier", key="ct_name")
+        ct_desc = st.text_area("Description", height=60, placeholder="What does this prompt do?", key="ct_desc")
 
         cc1, cc2, cc3 = st.columns(3)
         with cc1:
@@ -232,10 +240,10 @@ with tab_create:
                 key="ct_fmt",
             )
 
-        ct_system = st.text_area("System Prompt", height=80, placeholder="You are a helpful assistant...")
-        ct_user = st.text_area("User Prompt Template", height=120, placeholder="Analyze the following:\n\n{{input_text}}")
-        ct_example_in = st.text_area("Sample Input (optional)", height=60)
-        ct_example_out = st.text_area("Expected Output (optional)", height=60)
+        ct_system = st.text_area("System Prompt", height=80, placeholder="You are a helpful assistant...", key="ct_system")
+        ct_user = st.text_area("User Prompt Template", height=120, placeholder="Analyze the following:\n\n{{input_text}}", key="ct_user")
+        ct_example_in = st.text_area("Sample Input (optional)", height=60, key="ct_example_in")
+        ct_example_out = st.text_area("Expected Output (optional)", height=60, key="ct_example_out")
 
         if st.form_submit_button("Save Prompt", type="primary"):
             if not ct_name.strip():
@@ -258,5 +266,6 @@ with tab_create:
                     is_builtin=False,
                 )
                 db.save_prompt_template(template)
-                st.success(f"Prompt '{ct_name.strip()}' added to your library.")
+                st.session_state["lib_created_msg"] = f"Prompt '{ct_name.strip()}' added to your library."
+                st.session_state["lib_reset_create_form"] = True
                 st.rerun()
