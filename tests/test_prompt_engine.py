@@ -7,7 +7,13 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 import pytest
-from src.template_engine import extract_variables, render_template, validate_template, preview_template
+from src.template_engine import (
+    analyze_prompt_structure,
+    extract_variables,
+    preview_template,
+    render_template,
+    validate_template,
+)
 from src.schemas import (
     PromptVersion, FewShotExample, PromptingTechnique, OutputFormat,
 )
@@ -57,6 +63,29 @@ class TestTemplateEngine:
     def test_preview_template_without_values(self):
         result = preview_template("Hello {{name}}!")
         assert result == "Hello [name]!"
+
+    def test_analyze_prompt_structure_catches_duplicate_and_missing_vars(self):
+        text = "You are an expert Data Analyst and your task is to summarize the given dataset."
+        res = analyze_prompt_structure(
+            system_prompt=text,
+            user_prompt=text,
+            technique="role_based",
+        )
+        assert res["score"] < 60
+        assert res["grade"] in ("Weak", "Moderate")
+        assert any("identical" in i.lower() for i in res["issues"])
+        assert any("{{variable}}" in i.lower() for i in res["issues"])
+
+    def test_analyze_prompt_structure_rewards_well_engineered_prompt(self):
+        res = analyze_prompt_structure(
+            system_prompt="You are a senior data analyst. Respond concisely in 3 bullet points.",
+            user_prompt="Summarize key trends in the dataset below:\n<user_input>{{dataset}}</user_input>",
+            technique="role_based",
+            output_format="bullet_points",
+        )
+        assert res["score"] >= 90
+        assert res["grade"] == "Strong"
+        assert res["issues"] == []
 
 
 class TestPromptEngine:

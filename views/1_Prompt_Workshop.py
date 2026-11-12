@@ -25,7 +25,12 @@ from src.schemas import (
     TaskCategory,
     TestCase,
 )
-from src.template_engine import extract_variables, preview_template, validate_template
+from src.template_engine import (
+    analyze_prompt_structure,
+    extract_variables,
+    preview_template,
+    validate_template,
+)
 from src.ui_helpers import (
     clear_workshop_widgets,
     get_database,
@@ -314,28 +319,29 @@ with right_col:
             st.info("Enter a prompt template to see the live preview.")
 
         if user_prompt:
-            st.markdown("##### Prompt Checks")
-            issues = []
-            if not system_prompt:
-                issues.append("No system prompt — consider adding role or context instructions.")
-            if len(user_prompt) < 20:
-                issues.append("Very short prompt — may lack specificity.")
-            if "{{" not in user_prompt and tech == "zero_shot":
-                issues.append("No template variables — prompt will be static.")
-            if fmt == "json" and "json" not in user_prompt.lower():
-                issues.append("JSON output selected but not mentioned in prompt.")
-            if tech == "role_based" and (not system_prompt.strip() or system_prompt.strip().lower() == "you are a helpful assistant."):
-                issues.append("Role-based selected with a generic or empty system prompt — define a specific expert role and domain.")
-            if tech == "structured_output" and not any(kw in user_prompt.lower() for kw in ["json", "field", "schema", "format", "key", "column"]):
-                issues.append("Structured output selected — specify expected fields or output schema in the prompt.")
-            if tech == "task_decomposition" and not any(kw in user_prompt.lower() for kw in ["step", "1.", "first", "then", "finally"]):
-                issues.append("No explicit steps detected — a default 3-step decomposition scaffold will be prepended automatically.")
-
-            if issues:
-                for issue in issues:
-                    st.markdown(f"- {issue}")
+            st.markdown("##### Prompt Quality Check")
+            filled_fs = len([
+                ex for ex in st.session_state.get("ws_few_shots", [])
+                if ex.get("input_text") and ex.get("output_text")
+            ])
+            analysis = analyze_prompt_structure(
+                system_prompt=system_prompt,
+                user_prompt=user_prompt,
+                technique=tech,
+                output_format=fmt,
+                few_shot_count=filled_fs,
+            )
+            sc_val = analysis["score"]
+            grade = analysis["grade"]
+            if grade == "Strong":
+                st.success(f"Readiness: {sc_val}/100 ({grade})")
+            elif grade == "Moderate":
+                st.warning(f"Readiness: {sc_val}/100 ({grade})")
             else:
-                st.success("Prompt looks well-structured.")
+                st.error(f"Readiness: {sc_val}/100 ({grade})")
+
+            for issue in analysis["issues"]:
+                st.markdown(f"- {issue}")
 
         st.divider()
 
