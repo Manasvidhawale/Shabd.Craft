@@ -146,6 +146,11 @@ class Database:
                     updated_at TEXT NOT NULL
                 );
 
+                CREATE TABLE IF NOT EXISTS app_meta (
+                    key TEXT PRIMARY KEY,
+                    value TEXT NOT NULL
+                );
+
                 CREATE INDEX IF NOT EXISTS idx_pv_experiment ON prompt_versions(experiment_id);
                 CREATE INDEX IF NOT EXISTS idx_tc_experiment ON test_cases(experiment_id);
                 CREATE INDEX IF NOT EXISTS idx_er_experiment ON evaluation_results(experiment_id);
@@ -233,6 +238,47 @@ class Database:
                 (experiment_id,),
             ).fetchone()
             return (row["mx"] or 0) + 1
+
+    def delete_prompt_version(self, version_id: str):
+        with self._connect() as conn:
+            conn.execute("DELETE FROM evaluation_results WHERE prompt_version_id = ?", (version_id,))
+            conn.execute("DELETE FROM optimization_candidates WHERE original_version_id = ?", (version_id,))
+            conn.execute("DELETE FROM prompt_versions WHERE id = ?", (version_id,))
+
+    def update_prompt_version(
+        self,
+        version_id: str,
+        version_label: str,
+        system_prompt: str,
+        user_prompt_template: str,
+        technique: str,
+        output_format: str,
+        model_name: str,
+        temperature: float,
+        max_tokens: int,
+        few_shot_examples: list[dict] | None = None,
+        variables: list[str] | None = None,
+    ):
+        with self._connect() as conn:
+            conn.execute(
+                "UPDATE prompt_versions SET version_label = ?, system_prompt = ?, "
+                "user_prompt_template = ?, technique = ?, output_format = ?, "
+                "model_name = ?, temperature = ?, max_tokens = ?, "
+                "few_shot_examples = ?, variables = ? WHERE id = ?",
+                (
+                    version_label,
+                    system_prompt,
+                    user_prompt_template,
+                    technique,
+                    output_format,
+                    model_name,
+                    temperature,
+                    max_tokens,
+                    json.dumps(few_shot_examples or []),
+                    json.dumps(variables or []),
+                    version_id,
+                ),
+            )
 
     # ── Test Cases ─────────────────────────────────────────────────────
 
@@ -403,9 +449,32 @@ class Database:
                 ).fetchall()
             return [dict(r) for r in rows]
 
-    def delete_prompt_template(self, template_id: str):
+    def delete_prompt_template(self, template_id: str, allow_builtin: bool = False):
         with self._connect() as conn:
-            conn.execute("DELETE FROM prompt_library WHERE id = ? AND is_builtin = 0", (template_id,))
+            if allow_builtin:
+                conn.execute("DELETE FROM prompt_library WHERE id = ?", (template_id,))
+            else:
+                conn.execute("DELETE FROM prompt_library WHERE id = ? AND is_builtin = 0", (template_id,))
+
+    def get_meta(self, key: str, default: str = "") -> str:
+        with self._connect() as conn:
+            row = conn.execute("SELECT value FROM app_meta WHERE key = ?", (key,)).fetchone()
+            return row["value"] if row else default
+
+    def set_meta(self, key: str, value: str):
+        with self._connect() as conn:
+            conn.execute(
+                "INSERT OR REPLACE INTO app_meta (key, value) VALUES (?, ?)",
+                (key, value),
+            )
+
+    def clear_all_experiments(self):
+        with self._connect() as conn:
+            conn.execute("DELETE FROM evaluation_results")
+            conn.execute("DELETE FROM optimization_candidates")
+            conn.execute("DELETE FROM test_cases")
+            conn.execute("DELETE FROM prompt_versions")
+            conn.execute("DELETE FROM experiments")
 
     # ── Dashboard Metrics ──────────────────────────────────────────────
 
