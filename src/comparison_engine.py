@@ -6,7 +6,10 @@ Side-by-side comparison of prompt versions on shared test cases.
 
 from __future__ import annotations
 
+import difflib
+import html
 import json
+import re
 from src.schemas import (
     VersionComparison, EvaluationResult, PromptVersion,
     ExecutionStatus,
@@ -40,11 +43,6 @@ def compare_versions(
         limitations.append(f"Small sample size ({test_count} test cases).")
     if count_a != count_b:
         limitations.append(f"Different success counts: {count_a} vs {count_b}.")
-
-    demo_a = any(r.get("is_demo") for r in results_a)
-    demo_b = any(r.get("is_demo") for r in results_b)
-    if demo_a or demo_b:
-        limitations.append("Results include simulated demo evaluations.")
 
     diff = overall_a - overall_b
     if abs(diff) < 2:
@@ -135,3 +133,63 @@ def get_side_by_side_outputs(
             "status_b": rb.get("execution_status", "—"),
         })
     return rows
+
+
+def build_word_diff_html(text_a: str, text_b: str) -> str:
+    """
+    Build an HTML word-level diff comparing text_a -> text_b.
+
+    Escapes HTML entities safely and preserves line breaks.
+    """
+    tokens_a = re.findall(r"\S+|\n|[ \t]+", text_a or "")
+    tokens_b = re.findall(r"\S+|\n|[ \t]+", text_b or "")
+    matcher = difflib.SequenceMatcher(None, tokens_a, tokens_b)
+
+    parts = []
+    for tag, i1, i2, j1, j2 in matcher.get_opcodes():
+        if tag == "equal":
+            parts.append(_format_diff_tokens(tokens_a[i1:i2], kind="equal"))
+        elif tag in ("delete", "replace"):
+            parts.append(_format_diff_tokens(tokens_a[i1:i2], kind="delete"))
+            if tag == "replace":
+                parts.append(_format_diff_tokens(tokens_b[j1:j2], kind="insert"))
+        elif tag == "insert":
+            parts.append(_format_diff_tokens(tokens_b[j1:j2], kind="insert"))
+
+    body = "".join(parts)
+    return (
+        "<div style='background:#1e2130;border:1px solid #2a2d3e;border-radius:8px;"
+        "padding:14px;font-family:JetBrains Mono,monospace;font-size:0.84rem;"
+        "line-height:1.6;color:#e8eaed;white-space:pre-wrap;'>"
+        f"{body}</div>"
+    )
+
+
+def _format_diff_tokens(tokens: list[str], kind: str) -> str:
+    out = []
+    for tok in tokens:
+        if tok == "\n":
+            out.append("<br>")
+            continue
+        escaped = html.escape(tok)
+        if kind == "delete":
+            if tok.strip():
+                out.append(
+                    "<span style='background:rgba(248,113,113,0.18);color:#f87171;"
+                    "text-decoration:line-through;border-radius:3px;padding:0 2px;'>"
+                    f"{escaped}</span>"
+                )
+            else:
+                out.append(escaped)
+        elif kind == "insert":
+            if tok.strip():
+                out.append(
+                    "<span style='background:rgba(52,211,153,0.18);color:#34d399;"
+                    "border-radius:3px;padding:0 2px;'>"
+                    f"{escaped}</span>"
+                )
+            else:
+                out.append(escaped)
+        else:
+            out.append(escaped)
+    return "".join(out)

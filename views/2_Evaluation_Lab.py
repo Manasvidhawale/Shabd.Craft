@@ -13,50 +13,48 @@ import json
 import pandas as pd
 import plotly.graph_objects as go
 from src.config import settings
-from src.database import Database
+from src.ui_helpers import (
+    get_active_eval_weights,
+    get_database,
+    render_empty_experiment_state,
+    render_page_header,
+)
 from src.schemas import (
     PromptVersion, TestCase, EvaluationWeights, EvaluationResult,
     EvaluationMethod, PromptingTechnique, OutputFormat, FewShotExample,
     ExecutionStatus, CriterionScore, _new_id, _now,
 )
 from src.evaluation_engine import evaluate_batch, aggregate_results, calculate_weighted_score
+from src.harness import evaluate_quality_gate
+from src.security_evaluator import (
+    run_security_audit, audit_prompt_defenses, harden_prompt_suggestion,
+)
 from src.export_service import (
     export_results_csv, export_results_json, parse_test_cases_csv, parse_test_cases_json,
 )
 
-st.set_page_config(page_title="Evaluation Lab — Shabd.Craft", page_icon="✦", layout="wide")
+db = get_database()
 
-@st.cache_resource
-def get_db():
-    return Database(settings.db_path)
-
-db = get_db()
-
-st.markdown("## 🔬 Evaluation Lab")
-st.caption("Test prompts against datasets and measure performance with systematic evaluation.")
-
-if settings.is_demo_mode:
-    st.markdown('<span style="display:inline-block;padding:3px 10px;border-radius:20px;font-size:0.72rem;font-weight:600;background:rgba(251,191,36,0.15);color:#fbbf24;border:1px solid rgba(251,191,36,0.3);">⚡ Demo Mode — evaluations are simulated</span>', unsafe_allow_html=True)
-
-st.divider()
+render_page_header("Evaluation Lab", "Test prompts against datasets, inspect scores, and audit injection resistance.")
 
 # ── Select Experiment ──────────────────────────────────────────────────
 experiments = db.list_experiments()
 
 if not experiments:
-    st.info("No experiments found. Create one in the **Prompt Workshop** first.")
-    if st.button("✦ Go to Prompt Workshop", type="primary"):
-        st.switch_page("pages/2_Prompt_Workshop.py")
+    render_empty_experiment_state("No prompts saved yet. Create one in the Prompt Workshop first.")
     st.stop()
 
-exp_options = {e["id"]: f"{e['name']} ({e['category']})" for e in experiments}
+exp_options = {e["id"]: f"{e['name']} ({e['category'].replace('_', ' ').title()})" for e in experiments}
 default_exp = st.session_state.get("current_experiment_id", experiments[0]["id"])
 if default_exp not in exp_options:
     default_exp = experiments[0]["id"]
 
-selected_exp_id = st.selectbox("Select Experiment", list(exp_options.keys()),
-                                format_func=lambda x: exp_options[x],
-                                index=list(exp_options.keys()).index(default_exp))
+sel_col1, sel_col2 = st.columns(2)
+with sel_col1:
+    selected_exp_id = st.selectbox("Experiment", list(exp_options.keys()),
+                                    format_func=lambda x: exp_options[x],
+                                    index=list(exp_options.keys()).index(default_exp))
+    st.session_state["current_experiment_id"] = selected_exp_id
 
 versions = db.get_prompt_versions(selected_exp_id)
 if not versions:
@@ -64,13 +62,19 @@ if not versions:
     st.stop()
 
 ver_options = {v["id"]: f"v{v['version_number']}: {v['version_label']}" for v in versions}
-selected_ver_id = st.selectbox("Select Prompt Version", list(ver_options.keys()),
-                                format_func=lambda x: ver_options[x])
+default_ver = st.session_state.get("current_version_id", versions[0]["id"])
+if default_ver not in ver_options:
+    default_ver = versions[0]["id"]
+with sel_col2:
+    selected_ver_id = st.selectbox("Prompt Version", list(ver_options.keys()),
+                                    format_func=lambda x: ver_options[x],
+                                    index=list(ver_options.keys()).index(default_ver))
+    st.session_state["current_version_id"] = selected_ver_id
 
 st.markdown("")
 
 # ── Tabs ───────────────────────────────────────────────────────────────
-tab_data, tab_config, tab_results = st.tabs(["📋 Test Cases", "⚙ Evaluation Config", "📊 Results"])
+tab_data, tab_config, tab_results, tab_security = st.tabs(["Test Cases", "Evaluation Config", "Results", "Security Audit"])
 
 # ── Tab 1: Test Cases ──────────────────────────────────────────────────
 with tab_data:
@@ -89,12 +93,12 @@ with tab_data:
         if sample_path.exists():
             with open(sample_path, "r") as f:
                 sample_data = f.read()
-            st.download_button("📥 Sample Dataset", sample_data,
+            st.download_button("Sample Dataset", sample_data,
                              file_name="sample_test_cases.json", mime="application/json")
     with imp3:
         if test_cases:
             csv_export = export_results_csv([], test_cases)
-            st.download_button("📤 Export Test Cases", csv_export,
+            st.download_button("Export Test Cases", csv_export,
                              file_name="test_cases.csv", mime="text/csv")
 
     if uploaded:
@@ -119,7 +123,7 @@ with tab_data:
     st.markdown("")
 
     # Add manually
-    with st.expander("➕ Add Test Case Manually"):
+    with st.expander("Add Test Case Manually"):
         with st.form("add_tc_form"):
             tc_input = st.text_area("Input Data", height=80, placeholder="Enter test input...")
             tc_expected = st.text_area("Expected Output (optional)", height=60)
@@ -144,7 +148,7 @@ with tab_data:
                 st.text_area("Input", tc["input_data"], height=60, disabled=True, key=f"tc_v_in_{i}")
                 if tc.get("expected_output"):
                     st.text_area("Expected", tc["expected_output"], height=60, disabled=True, key=f"tc_v_exp_{i}")
-                if st.button("🗑 Delete", key=f"del_tc_{tc['id']}"):
+                if st.button("Delete", key=f"del_tc_{tc['id']}"):
                     db.delete_test_case(tc["id"])
                     st.rerun()
     else:
@@ -161,22 +165,23 @@ with tab_config:
                      index=0, horizontal=True)
 
     if method in ("llm_judge", "combined"):
-        st.caption("⚠ LLM-as-a-Judge scores may vary between runs and are not objective ground truth.")
+        st.caption("Note: LLM-as-a-Judge scores may vary between runs and are not objective ground truth.")
 
     st.markdown("##### Evaluation Weights")
     st.caption("Configure the relative importance of each criterion. Weights are normalized automatically.")
 
+    active_w = get_active_eval_weights()
     w1, w2, w3, w4, w5 = st.columns(5)
     with w1:
-        w_acc = st.slider("Accuracy", 0.0, 1.0, 0.25, 0.05, key="w_acc")
+        w_acc = st.slider("Accuracy", 0.0, 1.0, float(active_w.accuracy), 0.05, key="w_acc")
     with w2:
-        w_rel = st.slider("Relevance", 0.0, 1.0, 0.20, 0.05, key="w_rel")
+        w_rel = st.slider("Relevance", 0.0, 1.0, float(active_w.relevance), 0.05, key="w_rel")
     with w3:
-        w_ins = st.slider("Instruction Adherence", 0.0, 1.0, 0.25, 0.05, key="w_ins")
+        w_ins = st.slider("Instruction Adherence", 0.0, 1.0, float(active_w.instruction_adherence), 0.05, key="w_ins")
     with w4:
-        w_cla = st.slider("Clarity", 0.0, 1.0, 0.15, 0.05, key="w_cla")
+        w_cla = st.slider("Clarity", 0.0, 1.0, float(active_w.clarity), 0.05, key="w_cla")
     with w5:
-        w_fmt = st.slider("Format Compliance", 0.0, 1.0, 0.15, 0.05, key="w_fmt")
+        w_fmt = st.slider("Format Compliance", 0.0, 1.0, float(active_w.format_compliance), 0.05, key="w_fmt")
 
     total_w = w_acc + w_rel + w_ins + w_cla + w_fmt
     if total_w == 0:
@@ -218,9 +223,39 @@ with tab_results:
         rm3.metric("Failed", agg["failed"])
         rm4.metric("Score Range", f"{agg['min_score']:.0f}–{agg['max_score']:.0f}")
 
-        # Demo warning
-        if any(r.get("is_demo") for r in existing_results):
-            st.caption("⚡ Results include simulated demo evaluations.")
+        with st.expander("Regression Quality Gate", expanded=False):
+            gc1, gc2, gc3 = st.columns(3)
+            with gc1:
+                min_avg_gate = st.number_input("Min Avg Score", 0.0, 100.0, 75.0, 5.0, key="gate_min_avg")
+            with gc2:
+                min_fmt_gate = st.number_input("Min Format Score", 0.0, 100.0, 80.0, 5.0, key="gate_min_fmt")
+            with gc3:
+                min_sec_gate = st.number_input("Min Security Score (%)", 0.0, 100.0, 80.0, 5.0, key="gate_min_sec")
+
+            sec_rep = st.session_state.get(f"sec_audit_{selected_ver_id}")
+            gate = evaluate_quality_gate(
+                existing_results,
+                security_report=sec_rep,
+                min_avg_score=min_avg_gate,
+                min_format_score=min_fmt_gate,
+                min_security_score=min_sec_gate,
+            )
+            if gate["passed"]:
+                st.success(f"Release Gate: {gate['status']} — All thresholds satisfied.")
+            else:
+                st.error(f"Release Gate: {gate['status']} — One or more thresholds failed.")
+            gate_rows = [
+                {
+                    "Assertion": c["name"],
+                    "Actual": c["actual"],
+                    "Threshold": c["threshold"],
+                    "Status": "PASS" if c["passed"] else "FAIL",
+                }
+                for c in gate["checks"]
+            ]
+            st.dataframe(pd.DataFrame(gate_rows), use_container_width=True, hide_index=True)
+            if sec_rep is None:
+                st.caption("Run Security Audit tab to include security robustness in the quality gate.")
 
         # Criterion chart
         if agg["criterion_averages"]:
@@ -268,9 +303,9 @@ with tab_results:
 
         ex1, ex2 = st.columns(2)
         with ex1:
-            st.download_button("📥 Export CSV", csv_data, file_name="evaluation_results.csv", mime="text/csv")
+            st.download_button("Export CSV", csv_data, file_name="evaluation_results.csv", mime="text/csv")
         with ex2:
-            st.download_button("📥 Export JSON", json_data, file_name="evaluation_results.json", mime="application/json")
+            st.download_button("Export JSON", json_data, file_name="evaluation_results.json", mime="application/json")
 
         # Detail drill-down
         st.markdown("##### Inspect Individual Results")
@@ -300,6 +335,100 @@ with tab_results:
     else:
         st.info("No results yet. Configure settings and run the evaluation below.")
 
+# ── Tab 4: Security Audit ──────────────────────────────────────────────
+with tab_security:
+    st.markdown("##### Prompt Injection & Security Audit")
+    st.caption("Evaluates prompt resistance against direct overrides, system prompt extraction, delimiter escapes, and role hijacking.")
+
+    sec_ver_data = db.get_prompt_version(selected_ver_id)
+    if not sec_ver_data:
+        st.warning("Prompt version not found.")
+    else:
+        sec_few_shot = [FewShotExample(**e) for e in json.loads(sec_ver_data.get("few_shot_examples", "[]"))]
+        sec_version = PromptVersion(
+            id=sec_ver_data["id"],
+            experiment_id=selected_exp_id,
+            version_number=sec_ver_data["version_number"],
+            version_label=sec_ver_data["version_label"],
+            system_prompt=sec_ver_data["system_prompt"],
+            user_prompt_template=sec_ver_data["user_prompt_template"],
+            technique=PromptingTechnique(sec_ver_data["technique"]),
+            output_format=OutputFormat(sec_ver_data["output_format"]),
+            model_name=sec_ver_data["model_name"],
+            temperature=sec_ver_data["temperature"],
+            max_tokens=sec_ver_data["max_tokens"],
+            few_shot_examples=sec_few_shot,
+        )
+
+        static_posture = audit_prompt_defenses(sec_version)
+        st.markdown("**Static Defense Posture**")
+        sc1, sc2, sc3 = st.columns(3)
+        for col, chk in zip((sc1, sc2, sc3), static_posture["checks"]):
+            with col:
+                status_text = "PASS" if chk["passed"] else "MISSING"
+                st.metric(chk["name"], status_text)
+                st.caption(chk["detail"])
+
+        st.markdown("")
+        if st.button("Run Security Audit", type="primary", key=f"run_sec_{selected_ver_id}"):
+            with st.spinner("Running adversarial prompt injection suite..."):
+                audit_report = run_security_audit(sec_version)
+                st.session_state[f"sec_audit_{selected_ver_id}"] = audit_report
+
+        audit_report = st.session_state.get(f"sec_audit_{selected_ver_id}")
+        if audit_report:
+            am1, am2, am3 = st.columns(3)
+            am1.metric("Robustness Score", f"{audit_report['robustness_score']:.1f}%")
+            am2.metric("Attacks Resisted", f"{audit_report['resisted_count']}/{audit_report['total_count']}")
+            am3.metric("Static Posture", f"{static_posture['static_score']:.0f}%")
+
+            sec_rows = []
+            for item in audit_report["results"]:
+                sec_rows.append({
+                    "Category": item["category"],
+                    "Attack": item["attack_name"],
+                    "Result": "RESISTED" if item["resisted"] else "VULNERABLE",
+                    "Reason": item["reason"],
+                })
+            st.dataframe(pd.DataFrame(sec_rows), use_container_width=True, hide_index=True)
+
+            with st.expander("Inspect Attack Payloads & Model Responses"):
+                for item in audit_report["results"]:
+                    badge = "RESISTED" if item["resisted"] else "VULNERABLE"
+                    st.markdown(f"**[{badge}] {item['category']} — {item['attack_name']}**")
+                    st.code(item["payload"], language="text")
+                    st.caption(f"Response preview: {item['response_preview']}")
+
+        st.divider()
+        with st.expander("Hardening Suggestion (XML Delimiters + Security Boundary)"):
+            hard_sys, hard_user = harden_prompt_suggestion(sec_version)
+            st.markdown("**Suggested System Prompt:**")
+            st.code(hard_sys, language="text")
+            st.markdown("**Suggested User Prompt Template:**")
+            st.code(hard_user, language="text")
+
+            if st.button("Save Hardened Copy as New Version", key=f"save_hard_{selected_ver_id}"):
+                next_num = db.get_next_version_number(selected_exp_id)
+                hardened_ver = PromptVersion(
+                    experiment_id=selected_exp_id,
+                    version_number=next_num,
+                    version_label=f"{sec_version.version_label} (Hardened)",
+                    system_prompt=hard_sys,
+                    user_prompt_template=hard_user,
+                    technique=sec_version.technique,
+                    output_format=sec_version.output_format,
+                    model_name=sec_version.model_name,
+                    temperature=sec_version.temperature,
+                    max_tokens=sec_version.max_tokens,
+                    few_shot_examples=sec_version.few_shot_examples,
+                    is_optimized=True,
+                    optimization_strategy="Security Hardening",
+                )
+                new_ver_id = db.save_prompt_version(hardened_ver)
+                st.session_state["current_version_id"] = new_ver_id
+                st.success(f"Saved hardened version v{next_num}.")
+                st.rerun()
+
 # ── Run Evaluation ─────────────────────────────────────────────────────
 st.divider()
 test_cases = db.get_test_cases(selected_exp_id)
@@ -309,7 +438,7 @@ if not test_cases:
 elif total_w == 0:
     st.warning("Fix evaluation weights before running.")
 else:
-    if st.button("▶ Run Evaluation", type="primary", use_container_width=True):
+    if st.button("Run Evaluation", type="primary", use_container_width=True):
         weights = EvaluationWeights(accuracy=w_acc, relevance=w_rel,
                                     instruction_adherence=w_ins, clarity=w_cla,
                                     format_compliance=w_fmt)
