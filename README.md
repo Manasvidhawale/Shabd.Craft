@@ -35,10 +35,10 @@ Prompt engineering is widely practiced but rarely systematic. Most practitioners
 
 | Feature | Description |
 |---|---|
-| **Prompt Workshop** | Interactive IDE-like editor for all 6 prompting techniques |
-| **Evaluation Lab** | Systematic evaluation with rule-based and LLM-as-a-Judge methods |
+| **Prompt Workshop** | Interactive IDE-like editor for all 7 prompting techniques + production code export |
+| **Evaluation Lab** | Rule-based & LLM-as-a-Judge evaluation plus Prompt Injection Security Audit |
 | **Prompt Optimizer** | AI-powered candidate generation with evidence-based recommendations |
-| **Version Comparison** | Side-by-side prompt and output comparison with interactive charts |
+| **Version Comparison** | Inline word-level prompt diff, side-by-side outputs, and interactive charts |
 | **Experiment History** | SQLite-backed persistent experiment storage |
 | **Prompt Library** | 9 built-in templates + user-created template management |
 | **Demo Mode** | Full functionality without an API key (clearly labeled simulated outputs) |
@@ -67,7 +67,7 @@ Prompt engineering is widely practiced but rarely systematic. Most practitioners
 ```
 ┌─────────────────────────────────────────────────────┐
 │                   Streamlit UI                       │
-│  app.py + pages/ (8 pages)                          │
+│  app.py (Navigation Shell) + views/ (8 views)       │
 └────────────────────┬────────────────────────────────┘
                      │
          ┌───────────▼───────────┐
@@ -86,8 +86,8 @@ Prompt engineering is widely practiced but rarely systematic. Most practitioners
 │template_ │  │rule_based_│  │ optimizer.py│
 │engine.py │  │evaluator  │  │             │
 │prompt_   │  │llm_judge  │  │             │
-│engine.py │  │evaluation_│  │comparison_  │
-│          │  │engine.py  │  │engine.py    │
+│engine.py │  │security_  │  │comparison_  │
+│          │  │evaluator  │  │engine.py    │
 └────┬─────┘  └─────┬─────┘  └──────┬──────┘
      │               │               │
      └───────────────┼───────────────┘
@@ -119,15 +119,15 @@ Shabd.Craft/
 ├── pytest.ini
 ├── README.md
 │
-├── pages/
-│   ├── 1_Dashboard.py              # Analytics overview
-│   ├── 2_Prompt_Workshop.py        # Prompt creation & execution
-│   ├── 3_Evaluation_Lab.py         # Batch evaluation
-│   ├── 4_Prompt_Optimizer.py       # AI-powered optimization
-│   ├── 5_Compare_Versions.py       # Side-by-side comparison
-│   ├── 6_Experiment_History.py     # Persistent history
-│   ├── 7_Prompt_Library.py         # Template library
-│   └── 8_Settings.py               # Configuration
+├── views/
+│   ├── 0_Home.py                   # Overview dashboard & workflow guide
+│   ├── 1_Prompt_Workshop.py        # Prompt creation, execution & code export
+│   ├── 2_Evaluation_Lab.py         # Batch evaluation & security audit
+│   ├── 3_Prompt_Optimizer.py       # AI-powered optimization
+│   ├── 4_Compare_Versions.py       # Inline diff & side-by-side comparison
+│   ├── 5_Experiment_History.py     # Persistent history
+│   ├── 6_Prompt_Library.py         # Template library
+│   └── 7_Settings.py               # Configuration
 │
 ├── src/
 │   ├── config.py                   # Settings & environment
@@ -138,10 +138,14 @@ Shabd.Craft/
 │   ├── evaluation_engine.py        # Evaluation orchestration
 │   ├── rule_based_evaluator.py     # Deterministic evaluation
 │   ├── llm_judge.py                # LLM-as-a-Judge evaluator
+│   ├── security_evaluator.py       # Prompt injection & defense audit
+│   ├── guardrails.py               # Input/output PII, injection & leak filters
+│   ├── harness.py                  # Runtime auto-repair & CI quality gate
+│   ├── ui_helpers.py               # Shared UI state & header helpers
 │   ├── optimizer.py                # Prompt optimization candidates
-│   ├── comparison_engine.py        # Version comparison
+│   ├── comparison_engine.py        # Version comparison & diff helper
 │   ├── experiment_service.py       # Experiment lifecycle
-│   ├── export_service.py           # CSV/JSON export & import
+│   ├── export_service.py           # CSV/JSON & code snippet export
 │   └── providers/
 │       ├── base.py                 # Abstract provider interface
 │       ├── openai_provider.py      # OpenAI API integration
@@ -154,6 +158,11 @@ Shabd.Craft/
 ├── tests/
 │   ├── test_prompt_engine.py       # Template & prompt construction
 │   ├── test_evaluation.py          # Evaluation engine & rule-based
+│   ├── test_security_evaluator.py  # Prompt injection & hardening checks
+│   ├── test_guardrails.py          # PII redaction, injection & leak guardrails
+│   ├── test_harness.py             # Auto-repair harness, quality gate & CLI
+│   ├── test_comparison_engine.py   # Version comparison & word diff
+│   ├── test_export_service.py      # Production code generation
 │   ├── test_optimizer.py           # Optimizer candidates & recommendation
 │   ├── test_database.py            # SQLite persistence
 │   └── test_schemas.py             # Pydantic schema validation
@@ -260,17 +269,25 @@ py -m pytest tests/ -v -W error::DeprecationWarning
 
 # Run specific test file
 py -m pytest tests/test_evaluation.py -v
+
+# Run CLI regression harness gate for an experiment
+python -m src.harness --experiment "My Experiment" --min-score 75 --min-security 80
 ```
 
 **Test coverage:**
 
 | Test File | Tests | Covers |
 |---|---|---|
-| `test_prompt_engine.py` | 17 | Template engine, prompt construction, few-shot |
-| `test_evaluation.py` | 13 | Weights, scoring, rule-based evaluator, aggregation |
-| `test_optimizer.py` | 15 | Candidate generation, JSON parsing, recommendation |
-| `test_database.py` | 15 | All SQLite CRUD operations |
-| `test_schemas.py` | 30+ | All Pydantic schemas and validators |
+| `test_prompt_engine.py` | 21 | Template engine, prompt construction, few-shot, CoT, decomposition |
+| `test_evaluation.py` | 18 | Weights, scoring, rule-based evaluator, aggregation |
+| `test_security_evaluator.py` | 9 | Prompt injection checks, static posture, hardening |
+| `test_guardrails.py` | 11 | Input/output PII redaction, injection blocking, leak filter |
+| `test_harness.py` | 11 | Input sanitization, auto-repair retries, quality gate & CLI |
+| `test_comparison_engine.py` | 4 | Version comparison, HTML word-level diff |
+| `test_export_service.py` | 2 | Production code generation (OpenAI SDK, LangChain, cURL) |
+| `test_optimizer.py` | 16 | Candidate generation, JSON parsing, recommendation |
+| `test_database.py` | 19 | All SQLite CRUD operations & version deletion |
+| `test_schemas.py` | 36 | All Pydantic schemas and validators |
 
 All tests run **without network access or API keys** (LLM calls are mocked).
 
@@ -285,7 +302,8 @@ All tests run **without network access or API keys** (LLM calls are mocked).
 | **Few-Shot** | Complex tasks requiring consistent formatting |
 | **Role-Based** | Domain-specific tasks needing expert framing |
 | **Structured Output** | When downstream systems need parseable JSON |
-| **Task Decomposition** | Multi-step reasoning or analysis tasks |
+| **Task Decomposition** | Multi-step tasks broken into sequential subtasks |
+| **Chain-of-Thought (CoT)** | Reasoning tasks requiring explicit step-by-step thinking |
 
 ---
 

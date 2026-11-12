@@ -192,3 +192,51 @@ class TestPromptLibrary:
         db.delete_prompt_template(tmpl.id)  # Should not delete
         templates = db.get_prompt_templates(builtin_only=True)
         assert any(t["id"] == tmpl.id for t in templates)
+
+    def test_delete_builtin_when_allowed(self, db):
+        tmpl = PromptTemplate(
+            name="Builtin Removable",
+            user_prompt_template="Test",
+            is_builtin=True,
+        )
+        db.save_prompt_template(tmpl)
+        db.delete_prompt_template(tmpl.id, allow_builtin=True)
+        templates = db.get_prompt_templates()
+        assert not any(t["id"] == tmpl.id for t in templates)
+
+
+class TestVersionDeletionAndMeta:
+    def test_delete_prompt_version_cleans_dependencies(self, db):
+        exp = Experiment(name="Ver Delete Exp")
+        db.create_experiment(exp)
+        pv = PromptVersion(experiment_id=exp.id, version_number=1, user_prompt_template="v1")
+        db.save_prompt_version(pv)
+        db.delete_prompt_version(pv.id)
+        assert db.get_prompt_version(pv.id) is None
+        assert db.get_prompt_versions(exp.id) == []
+
+    def test_update_prompt_version(self, db):
+        exp = Experiment(name="Ver Update Exp")
+        db.create_experiment(exp)
+        pv = PromptVersion(experiment_id=exp.id, version_number=1, user_prompt_template="old")
+        db.save_prompt_version(pv)
+        db.update_prompt_version(
+            version_id=pv.id,
+            version_label="Edited",
+            system_prompt="sys",
+            user_prompt_template="new {{x}}",
+            technique="zero_shot",
+            output_format="text",
+            model_name="gpt-4o",
+            temperature=0.4,
+            max_tokens=512,
+            variables=["x"],
+        )
+        updated = db.get_prompt_version(pv.id)
+        assert updated["version_label"] == "Edited"
+        assert updated["user_prompt_template"] == "new {{x}}"
+
+    def test_app_meta_roundtrip(self, db):
+        assert db.get_meta("missing", "fallback") == "fallback"
+        db.set_meta("templates_seeded", "1")
+        assert db.get_meta("templates_seeded") == "1"
