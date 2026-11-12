@@ -13,7 +13,12 @@ import json
 import pandas as pd
 import plotly.graph_objects as go
 from src.config import settings
-from src.ui_helpers import get_database
+from src.ui_helpers import (
+    get_active_eval_weights,
+    get_database,
+    render_empty_experiment_state,
+    render_page_header,
+)
 from src.schemas import (
     PromptVersion, TestCase, EvaluationWeights, EvaluationResult,
     EvaluationMethod, ExecutionStatus, PromptingTechnique, OutputFormat,
@@ -24,20 +29,15 @@ from src.evaluation_engine import evaluate_batch, aggregate_results
 
 db = get_database()
 
-st.markdown("## Prompt Optimizer")
-st.caption("Generate improved prompt candidates, test them, and compare results.")
-
-st.divider()
+render_page_header("Prompt Optimizer", "Generate improved prompt candidates, benchmark them, and promote winners.")
 
 # ── Select experiment & version ────────────────────────────────────────
 experiments = db.list_experiments()
 if not experiments:
-    st.info("Create and evaluate an experiment first.")
-    if st.button("Go to Prompt Workshop", type="primary"):
-        st.switch_page("views/1_Prompt_Workshop.py")
+    render_empty_experiment_state("Create and evaluate a prompt first.")
     st.stop()
 
-exp_opts = {e["id"]: e["name"] for e in experiments}
+exp_opts = {e["id"]: f"{e['name']} ({e['category'].replace('_', ' ').title()})" for e in experiments}
 default_exp = st.session_state.get("current_experiment_id", experiments[0]["id"])
 if default_exp not in exp_opts:
     default_exp = experiments[0]["id"]
@@ -194,7 +194,7 @@ if existing_candidates:
                             tc_objects = [TestCase(id=tc["id"], input_data=tc["input_data"],
                                                    expected_output=tc.get("expected_output", ""))
                                          for tc in test_cases]
-                            weights = EvaluationWeights()
+                            weights = get_active_eval_weights()
 
                             with st.spinner(f"Testing {cand['candidate_label']}..."):
                                 eval_results = evaluate_batch(

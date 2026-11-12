@@ -13,7 +13,12 @@ import json
 import pandas as pd
 import plotly.graph_objects as go
 from src.config import settings
-from src.ui_helpers import get_database
+from src.ui_helpers import (
+    get_active_eval_weights,
+    get_database,
+    render_empty_experiment_state,
+    render_page_header,
+)
 from src.schemas import (
     PromptVersion, TestCase, EvaluationWeights, EvaluationResult,
     EvaluationMethod, PromptingTechnique, OutputFormat, FewShotExample,
@@ -29,28 +34,23 @@ from src.export_service import (
 
 db = get_database()
 
-st.markdown("## Evaluation Lab")
-st.caption("Test prompts against datasets and measure performance with systematic evaluation.")
-
-st.divider()
+render_page_header("Evaluation Lab", "Test prompts against datasets, inspect scores, and audit injection resistance.")
 
 # ── Select Experiment ──────────────────────────────────────────────────
 experiments = db.list_experiments()
 
 if not experiments:
-    st.info("No experiments found. Create one in the **Prompt Workshop** first.")
-    if st.button("Go to Prompt Workshop", type="primary"):
-        st.switch_page("views/1_Prompt_Workshop.py")
+    render_empty_experiment_state("No prompts saved yet. Create one in the Prompt Workshop first.")
     st.stop()
 
-exp_options = {e["id"]: f"{e['name']} ({e['category']})" for e in experiments}
+exp_options = {e["id"]: f"{e['name']} ({e['category'].replace('_', ' ').title()})" for e in experiments}
 default_exp = st.session_state.get("current_experiment_id", experiments[0]["id"])
 if default_exp not in exp_options:
     default_exp = experiments[0]["id"]
 
 sel_col1, sel_col2 = st.columns(2)
 with sel_col1:
-    selected_exp_id = st.selectbox("Select Experiment", list(exp_options.keys()),
+    selected_exp_id = st.selectbox("Experiment", list(exp_options.keys()),
                                     format_func=lambda x: exp_options[x],
                                     index=list(exp_options.keys()).index(default_exp))
     st.session_state["current_experiment_id"] = selected_exp_id
@@ -65,7 +65,7 @@ default_ver = st.session_state.get("current_version_id", versions[0]["id"])
 if default_ver not in ver_options:
     default_ver = versions[0]["id"]
 with sel_col2:
-    selected_ver_id = st.selectbox("Select Prompt Version", list(ver_options.keys()),
+    selected_ver_id = st.selectbox("Prompt Version", list(ver_options.keys()),
                                     format_func=lambda x: ver_options[x],
                                     index=list(ver_options.keys()).index(default_ver))
     st.session_state["current_version_id"] = selected_ver_id
@@ -169,17 +169,18 @@ with tab_config:
     st.markdown("##### Evaluation Weights")
     st.caption("Configure the relative importance of each criterion. Weights are normalized automatically.")
 
+    active_w = get_active_eval_weights()
     w1, w2, w3, w4, w5 = st.columns(5)
     with w1:
-        w_acc = st.slider("Accuracy", 0.0, 1.0, 0.25, 0.05, key="w_acc")
+        w_acc = st.slider("Accuracy", 0.0, 1.0, float(active_w.accuracy), 0.05, key="w_acc")
     with w2:
-        w_rel = st.slider("Relevance", 0.0, 1.0, 0.20, 0.05, key="w_rel")
+        w_rel = st.slider("Relevance", 0.0, 1.0, float(active_w.relevance), 0.05, key="w_rel")
     with w3:
-        w_ins = st.slider("Instruction Adherence", 0.0, 1.0, 0.25, 0.05, key="w_ins")
+        w_ins = st.slider("Instruction Adherence", 0.0, 1.0, float(active_w.instruction_adherence), 0.05, key="w_ins")
     with w4:
-        w_cla = st.slider("Clarity", 0.0, 1.0, 0.15, 0.05, key="w_cla")
+        w_cla = st.slider("Clarity", 0.0, 1.0, float(active_w.clarity), 0.05, key="w_cla")
     with w5:
-        w_fmt = st.slider("Format Compliance", 0.0, 1.0, 0.15, 0.05, key="w_fmt")
+        w_fmt = st.slider("Format Compliance", 0.0, 1.0, float(active_w.format_compliance), 0.05, key="w_fmt")
 
     total_w = w_acc + w_rel + w_ins + w_cla + w_fmt
     if total_w == 0:

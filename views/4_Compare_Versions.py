@@ -12,24 +12,26 @@ import streamlit as st
 import json
 import pandas as pd
 import plotly.graph_objects as go
-from src.ui_helpers import get_database
+from src.ui_helpers import (
+    get_database,
+    render_empty_experiment_state,
+    render_page_header,
+)
 from src.comparison_engine import (
     compare_versions, get_side_by_side_outputs, build_word_diff_html,
 )
 
 db = get_database()
 
-st.markdown("## Compare Versions")
-st.caption("Side-by-side comparison of prompt versions with shared test cases.")
-st.divider()
+render_page_header("Compare Versions", "Inspect word-level prompt changes, metric deltas, and test case outputs.")
 
 # ── Select experiment ──────────────────────────────────────────────────
 experiments = db.list_experiments()
 if not experiments:
-    st.info("No experiments available. Create one in the Prompt Workshop.")
+    render_empty_experiment_state("No prompts available yet. Create one in the Prompt Workshop.")
     st.stop()
 
-exp_opts = {e["id"]: e["name"] for e in experiments}
+exp_opts = {e["id"]: f"{e['name']} ({e['category'].replace('_', ' ').title()})" for e in experiments}
 default_exp = st.session_state.get("current_experiment_id", experiments[0]["id"])
 if default_exp not in exp_opts:
     default_exp = experiments[0]["id"]
@@ -40,7 +42,14 @@ st.session_state["current_experiment_id"] = sel_exp
 
 versions = db.get_prompt_versions(sel_exp)
 if len(versions) < 2:
-    st.info("Need at least 2 prompt versions to compare. Use the Optimizer to generate alternatives.")
+    st.info("This experiment only has 1 prompt version. Save a second version in Prompt Workshop or generate candidates in Prompt Optimizer to compare.")
+    cb1, cb2 = st.columns(2)
+    with cb1:
+        if st.button("Add Version in Workshop", type="primary", use_container_width=True):
+            st.switch_page("views/1_Prompt_Workshop.py")
+    with cb2:
+        if st.button("Open Prompt Optimizer", use_container_width=True):
+            st.switch_page("views/3_Prompt_Optimizer.py")
     st.stop()
 
 # ── Select two versions ───────────────────────────────────────────────
@@ -129,9 +138,9 @@ with sc3:
     diff = comparison.version_a_overall - comparison.version_b_overall
     st.markdown("**Difference**")
     if diff > 0:
-        st.markdown(f"<span style='color:#34d399;font-size:1.5rem;font-weight:700;'>+{diff:.1f}</span> ← A", unsafe_allow_html=True)
+        st.markdown(f"<span style='color:#34d399;font-size:1.5rem;font-weight:700;'>+{diff:.1f}</span> ({comparison.version_a_label})", unsafe_allow_html=True)
     elif diff < 0:
-        st.markdown(f"<span style='color:#34d399;font-size:1.5rem;font-weight:700;'>+{-diff:.1f}</span> ← B", unsafe_allow_html=True)
+        st.markdown(f"<span style='color:#34d399;font-size:1.5rem;font-weight:700;'>+{-diff:.1f}</span> ({comparison.version_b_label})", unsafe_allow_html=True)
     else:
         st.markdown("<span style='color:#9ba3b5;font-size:1.5rem;font-weight:700;'>Tied</span>", unsafe_allow_html=True)
 
@@ -168,9 +177,12 @@ if comparison.version_a_scores and comparison.version_b_scores:
 # ── D. Response Comparison ─────────────────────────────────────────────
 side_by_side = get_side_by_side_outputs(results_a, results_b)
 if side_by_side:
+    tc_map = {tc["id"]: tc.get("input_data", "") for tc in db.get_test_cases(sel_exp)}
     st.markdown("##### Output Comparison (by test case)")
-    for row in side_by_side[:10]:
-        with st.expander(f"TC: {row['test_case_id'][:8]}… — A: {row['score_a']:.0f} vs B: {row['score_b']:.0f}"):
+    for idx, row in enumerate(side_by_side[:10], 1):
+        tc_preview = tc_map.get(row["test_case_id"], "").replace("\n", " ")
+        tc_label = (tc_preview[:55] + "…") if len(tc_preview) > 55 else (tc_preview or f"Case {idx}")
+        with st.expander(f"TC {idx}: {tc_label} — A: {row['score_a']:.0f} vs B: {row['score_b']:.0f}"):
             oa, ob = st.columns(2)
             with oa:
                 st.markdown(f"**{comparison.version_a_label}** (Score: {row['score_a']:.1f})")
