@@ -1,161 +1,248 @@
 """
 Shabd.Craft — Prompt Library
 
-Reusable prompt templates with built-in and user-created templates.
+Create, edit, delete, preview, and launch reusable prompt templates.
 """
 
 import sys
 from pathlib import Path
+
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-import streamlit as st
 import json
-from src.ui_helpers import get_database, load_template_into_workshop
+import streamlit as st
+
 from src.schemas import (
-    PromptTemplate, FewShotExample, TaskCategory,
-    PromptingTechnique, OutputFormat, _now,
+    OutputFormat,
+    PromptTemplate,
+    PromptingTechnique,
+    TaskCategory,
+    _now,
+)
+from src.template_engine import extract_variables
+from src.ui_helpers import (
+    get_database,
+    load_template_into_workshop,
+    render_page_header,
+    restore_starter_templates,
 )
 
 db = get_database()
 
-st.markdown("## Prompt Library")
-st.caption("Browse, search, and manage reusable prompt templates.")
-st.divider()
+render_page_header("Prompt Library", "Create, edit, delete, and launch reusable prompt templates.")
 
-# ── Tabs ───────────────────────────────────────────────────────────────
-tab_browse, tab_create = st.tabs(["Browse Templates", "Create Template"])
+tab_browse, tab_create = st.tabs(["Browse Prompts", "Add New Prompt"])
 
 # ── Browse Tab ─────────────────────────────────────────────────────────
 with tab_browse:
-    # Filters
-    f1, f2, f3 = st.columns([3, 1, 1])
+    f1, f2, f3, f4 = st.columns([3, 1.2, 1.2, 1.2])
     with f1:
-        search = st.text_input("Search", placeholder="Search templates...", key="lib_search")
+        search = st.text_input("Search", placeholder="Search prompts...", key="lib_search")
     with f2:
         cat_options = ["All"] + [e.value for e in TaskCategory]
-        cat_filter = st.selectbox("Category", cat_options,
-                                  format_func=lambda x: x.replace("_", " ").title() if x != "All" else "All",
-                                  key="lib_cat")
+        cat_filter = st.selectbox(
+            "Category",
+            cat_options,
+            format_func=lambda x: x.replace("_", " ").title() if x != "All" else "All",
+            key="lib_cat",
+        )
     with f3:
-        source_filter = st.selectbox("Source", ["All", "Built-in", "My Templates"], key="lib_source")
+        source_filter = st.selectbox("Source", ["All", "Starter", "Custom"], key="lib_source")
+    with f4:
+        st.markdown("<div style='height:28px;'></div>", unsafe_allow_html=True)
+        if st.button("Restore Starters", use_container_width=True):
+            added = restore_starter_templates(db)
+            st.success(f"Restored {added} starter prompts." if added else "All starter prompts are already present.")
+            st.rerun()
 
-    # Fetch templates
-    if source_filter == "Built-in":
+    if source_filter == "Starter":
         templates = db.get_prompt_templates(builtin_only=True)
-    elif source_filter == "My Templates":
+    elif source_filter == "Custom":
         templates = db.get_prompt_templates(user_only=True)
     else:
         templates = db.get_prompt_templates()
 
-    # Apply filters
     if search:
-        templates = [t for t in templates if search.lower() in t["name"].lower()
-                     or search.lower() in t.get("description", "").lower()]
+        q = search.lower()
+        templates = [
+            t for t in templates
+            if q in t["name"].lower() or q in t.get("description", "").lower()
+        ]
     if cat_filter != "All":
         templates = [t for t in templates if t["category"] == cat_filter]
 
-    st.caption(f"Showing {len(templates)} templates")
-    st.markdown("")
+    st.caption(f"Showing {len(templates)} prompts")
+
+    # Inline edit panel if a user clicked Edit on a card
+    edit_id = st.session_state.get("lib_editing_id")
+    if edit_id:
+        edit_tmpl = next((t for t in db.get_prompt_templates() if t["id"] == edit_id), None)
+        if edit_tmpl:
+            with st.container(border=True):
+                st.markdown(f"##### Edit Prompt: {edit_tmpl['name']}")
+                with st.form(f"edit_tmpl_form_{edit_id}"):
+                    et_name = st.text_input("Prompt Name", value=edit_tmpl["name"])
+                    et_desc = st.text_area("Description", value=edit_tmpl.get("description", ""), height=60)
+                    ec1, ec2, ec3 = st.columns(3)
+                    cats = [e.value for e in TaskCategory]
+                    techs = [e.value for e in PromptingTechnique]
+                    fmts = [e.value for e in OutputFormat]
+                    with ec1:
+                        et_cat = st.selectbox(
+                            "Category",
+                            cats,
+                            index=cats.index(edit_tmpl["category"]) if edit_tmpl["category"] in cats else 0,
+                            format_func=lambda x: x.replace("_", " ").title(),
+                        )
+                    with ec2:
+                        t_val = edit_tmpl.get("technique", "zero_shot")
+                        et_tech = st.selectbox(
+                            "Technique",
+                            techs,
+                            index=techs.index(t_val) if t_val in techs else 0,
+                            format_func=lambda x: x.replace("_", " ").title(),
+                        )
+                    with ec3:
+                        f_val = edit_tmpl.get("output_format", "text")
+                        et_fmt = st.selectbox(
+                            "Output Format",
+                            fmts,
+                            index=fmts.index(f_val) if f_val in fmts else 0,
+                            format_func=lambda x: x.replace("_", " ").title(),
+                        )
+                    et_sys = st.text_area("System Prompt", value=edit_tmpl.get("system_prompt", ""), height=80)
+                    et_usr = st.text_area("User Prompt Template", value=edit_tmpl["user_prompt_template"], height=120)
+                    es1, es2 = st.columns(2)
+                    save_edit = es1.form_submit_button("Save Changes", type="primary", use_container_width=True)
+                    cancel_edit = es2.form_submit_button("Cancel", use_container_width=True)
+
+                if save_edit:
+                    if not et_name.strip() or not et_usr.strip():
+                        st.error("Name and user prompt template are required.")
+                    else:
+                        updated = PromptTemplate(
+                            id=edit_tmpl["id"],
+                            name=et_name.strip(),
+                            description=et_desc.strip(),
+                            category=TaskCategory(et_cat),
+                            system_prompt=et_sys,
+                            user_prompt_template=et_usr,
+                            variables=extract_variables(et_usr),
+                            technique=PromptingTechnique(et_tech),
+                            output_format=OutputFormat(et_fmt),
+                            example_input=edit_tmpl.get("example_input", ""),
+                            example_output=edit_tmpl.get("example_output", ""),
+                            is_builtin=bool(edit_tmpl.get("is_builtin", False)),
+                            created_at=edit_tmpl.get("created_at", _now()),
+                            updated_at=_now(),
+                        )
+                        db.save_prompt_template(updated)
+                        st.session_state.pop("lib_editing_id", None)
+                        st.success("Prompt updated.")
+                        st.rerun()
+                elif cancel_edit:
+                    st.session_state.pop("lib_editing_id", None)
+                    st.rerun()
 
     if not templates:
-        st.info("No templates match your filters.")
+        st.info("No prompts match your filters. Add one in the 'Add New Prompt' tab or click 'Restore Starters'.")
     else:
-        # Display in grid
-        cols = st.columns(2)
+        cols = st.columns(2, gap="medium")
         for i, tmpl in enumerate(templates):
             with cols[i % 2]:
                 cat_tag = tmpl["category"].replace("_", " ").upper()
-                is_builtin = tmpl.get("is_builtin", False)
-                badge = "Built-in" if is_builtin else "Custom"
+                is_builtin = bool(tmpl.get("is_builtin", False))
+                badge = "Starter" if is_builtin else "Custom"
                 badge_color = "#7c5cfc" if is_builtin else "#22d3ee"
+                badge_rgb = "124,92,252" if is_builtin else "34,211,238"
+                desc = tmpl.get("description", "")
+                desc_short = (desc[:110] + "...") if len(desc) > 110 else desc
 
-                with st.container():
-                    st.markdown(f"""
-                    <div style="background:#1e2130;border:1px solid #2a2d3e;border-radius:12px;padding:1.2rem;margin-bottom:0.8rem;">
+                st.markdown(f"""
+                <div class="card-surface" style="min-height:142px;display:flex;flex-direction:column;justify-content:space-between;">
+                    <div>
                         <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:0.4rem;">
-                            <span style="font-size:0.7rem;font-weight:600;letter-spacing:0.08em;color:#22d3ee;">{cat_tag}</span>
-                            <span style="font-size:0.68rem;padding:2px 8px;border-radius:12px;background:rgba({','.join(['124,92,252' if is_builtin else '34,211,238'])},0.15);color:{badge_color};">{badge}</span>
+                            <span style="font-size:0.7rem;font-weight:600;letter-spacing:0.08em;color:var(--accent-cyan);">{cat_tag}</span>
+                            <span style="font-size:0.68rem;padding:2px 8px;border-radius:12px;background:rgba({badge_rgb},0.15);color:{badge_color};">{badge}</span>
                         </div>
-                        <div style="font-size:1.05rem;font-weight:600;color:#e8eaed;margin-bottom:0.3rem;">{tmpl['name']}</div>
-                        <p style="color:#9ba3b5;font-size:0.82rem;margin:0.3rem 0;">{tmpl.get('description', '')[:120]}</p>
-                        <div style="color:#6b7280;font-size:0.72rem;margin-top:0.4rem;">
-                            Technique: {tmpl.get('technique', 'zero_shot').replace('_',' ').title()}
-                        </div>
+                        <div style="font-size:1.02rem;font-weight:600;color:var(--text-primary);margin-bottom:0.25rem;">{tmpl['name']}</div>
+                        <p style="color:var(--text-secondary);font-size:0.82rem;margin:0.2rem 0;">{desc_short}</p>
                     </div>
-                    """, unsafe_allow_html=True)
+                    <div style="color:var(--text-muted);font-size:0.72rem;margin-top:0.5rem;">
+                        Technique: {tmpl.get('technique', 'zero_shot').replace('_', ' ').title()}
+                    </div>
+                </div>
+                """, unsafe_allow_html=True)
 
-                    bc1, bc2, bc3 = st.columns(3)
-                    with bc1:
-                        if st.button("Use", key=f"use_{tmpl['id']}"):
-                            load_template_into_workshop(tmpl)
-                            st.switch_page("views/1_Prompt_Workshop.py")
-                    with bc2:
-                        if st.button("Preview", key=f"prev_{tmpl['id']}"):
-                            st.session_state[f"preview_{tmpl['id']}"] = True
-                    with bc3:
-                        if not is_builtin:
-                            if st.button("Delete", key=f"del_t_{tmpl['id']}"):
-                                db.delete_prompt_template(tmpl["id"])
-                                st.rerun()
+                bc1, bc2, bc3 = st.columns(3)
+                with bc1:
+                    if st.button("Open", key=f"use_{tmpl['id']}", use_container_width=True):
+                        load_template_into_workshop(tmpl)
+                        st.switch_page("views/1_Prompt_Workshop.py")
+                with bc2:
+                    if st.button("Edit", key=f"edit_t_{tmpl['id']}", use_container_width=True):
+                        st.session_state["lib_editing_id"] = tmpl["id"]
+                        st.rerun()
+                with bc3:
+                    if st.button("Delete", key=f"del_t_{tmpl['id']}", use_container_width=True):
+                        st.session_state[f"confirm_del_t_{tmpl['id']}"] = True
 
-                    # Preview section
-                    if st.session_state.get(f"preview_{tmpl['id']}"):
-                        with st.container():
-                            if tmpl.get("system_prompt"):
-                                st.markdown("**System Prompt:**")
-                                st.code(tmpl["system_prompt"], language="text")
-                            st.markdown("**User Prompt Template:**")
-                            st.code(tmpl["user_prompt_template"], language="text")
+                if st.session_state.get(f"confirm_del_t_{tmpl['id']}"):
+                    cd1, cd2 = st.columns(2)
+                    with cd1:
+                        if st.button("Confirm Delete", key=f"yes_t_{tmpl['id']}", type="primary", use_container_width=True):
+                            db.delete_prompt_template(tmpl["id"], allow_builtin=True)
+                            st.session_state.pop(f"confirm_del_t_{tmpl['id']}", None)
+                            if st.session_state.get("lib_editing_id") == tmpl["id"]:
+                                st.session_state.pop("lib_editing_id", None)
+                            st.rerun()
+                    with cd2:
+                        if st.button("Cancel", key=f"no_t_{tmpl['id']}", use_container_width=True):
+                            st.session_state.pop(f"confirm_del_t_{tmpl['id']}", None)
+                            st.rerun()
 
-                            variables = json.loads(tmpl.get("variables", "[]")) if isinstance(tmpl.get("variables"), str) else tmpl.get("variables", [])
-                            if variables:
-                                st.caption(f"Variables: `{'`, `'.join(variables)}`")
-
-                            if tmpl.get("example_input"):
-                                st.markdown("**Example Input:**")
-                                st.code(tmpl["example_input"][:300], language="text")
-                            if tmpl.get("example_output"):
-                                st.markdown("**Example Output:**")
-                                st.code(tmpl["example_output"][:300], language="text")
-
-                            if st.button("Close preview", key=f"close_{tmpl['id']}"):
-                                del st.session_state[f"preview_{tmpl['id']}"]
-                                st.rerun()
-
-# ── Create Template Tab ────────────────────────────────────────────────
+# ── Add New Prompt Tab ─────────────────────────────────────────────────
 with tab_create:
-    st.markdown("##### Create New Template")
+    st.markdown("##### Add New Prompt")
 
     with st.form("create_template"):
-        ct_name = st.text_input("Template Name", placeholder="My Custom Template")
-        ct_desc = st.text_area("Description", height=60, placeholder="What does this template do?")
+        ct_name = st.text_input("Prompt Name", placeholder="e.g., Support Ticket Classifier")
+        ct_desc = st.text_area("Description", height=60, placeholder="What does this prompt do?")
 
         cc1, cc2, cc3 = st.columns(3)
         with cc1:
-            ct_category = st.selectbox("Category", [e.value for e in TaskCategory],
-                                       format_func=lambda x: x.replace("_", " ").title(),
-                                       key="ct_cat")
+            ct_category = st.selectbox(
+                "Category",
+                [e.value for e in TaskCategory],
+                format_func=lambda x: x.replace("_", " ").title(),
+                key="ct_cat",
+            )
         with cc2:
-            ct_technique = st.selectbox("Technique", [e.value for e in PromptingTechnique],
-                                        format_func=lambda x: x.replace("_", " ").title(),
-                                        key="ct_tech")
+            ct_technique = st.selectbox(
+                "Technique",
+                [e.value for e in PromptingTechnique],
+                format_func=lambda x: x.replace("_", " ").title(),
+                key="ct_tech",
+            )
         with cc3:
-            ct_format = st.selectbox("Output Format", [e.value for e in OutputFormat],
-                                     format_func=lambda x: x.replace("_", " ").title(),
-                                     key="ct_fmt")
+            ct_format = st.selectbox(
+                "Output Format",
+                [e.value for e in OutputFormat],
+                format_func=lambda x: x.replace("_", " ").title(),
+                key="ct_fmt",
+            )
 
         ct_system = st.text_area("System Prompt", height=80, placeholder="You are a helpful assistant...")
         ct_user = st.text_area("User Prompt Template", height=120, placeholder="Analyze the following:\n\n{{input_text}}")
-        ct_example_in = st.text_area("Example Input", height=60)
-        ct_example_out = st.text_area("Example Output", height=60)
+        ct_example_in = st.text_area("Sample Input (optional)", height=60)
+        ct_example_out = st.text_area("Expected Output (optional)", height=60)
 
-        if st.form_submit_button("Save Template", type="primary"):
+        if st.form_submit_button("Save Prompt", type="primary"):
             if not ct_name.strip():
-                st.error("Template name is required.")
+                st.error("Prompt name is required.")
             elif not ct_user.strip():
                 st.error("User prompt template is required.")
             else:
-                from src.template_engine import extract_variables
                 variables = extract_variables(ct_user)
                 template = PromptTemplate(
                     name=ct_name.strip(),
@@ -171,5 +258,5 @@ with tab_create:
                     is_builtin=False,
                 )
                 db.save_prompt_template(template)
-                st.success(f"Template '{ct_name}' saved!")
+                st.success(f"Prompt '{ct_name.strip()}' added to your library.")
                 st.rerun()
