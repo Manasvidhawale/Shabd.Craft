@@ -19,6 +19,7 @@ from typing import Optional
 from src.config import settings
 from src.database import Database
 from src.evaluation_engine import aggregate_results, evaluate_batch
+from src.guardrails import check_input_guardrails, check_output_guardrails
 from src.prompt_engine import construct_prompt, get_provider
 from src.schemas import (
     EvaluationMethod,
@@ -114,16 +115,45 @@ def execute_with_harness(
     max_words: int | None = None,
     max_retries: int | None = None,
     sanitize_input: bool = True,
+    enable_guardrails: bool = False,
+    block_injection: bool = True,
+    redact_pii: bool = True,
+    banned_terms: list[str] | None = None,
 ) -> dict:
     """
-    Execute a prompt inside a reliability harness with optional input sanitization,
+    Execute a prompt inside a reliability harness with optional input/output guardrails,
     contract validation, and bounded self-repair retries.
     """
     retries = settings.max_retries if max_retries is None else max(0, int(max_retries))
     sanitized_input = input_data
     was_sanitized = False
+    guardrail_report: dict | None = None
 
-    if sanitize_input and input_data:
+    if enable_guardrails:
+        in_guard = check_input_guardrails(
+            input_data,
+            block_injection=block_injection,
+            redact_pii=redact_pii,
+            banned_terms=banned_terms,
+        )
+        if not in_guard["allowed"]:
+            blocked_msg = f"[Blocked by Input Guardrail] {in_guard['blocked_reason']}"
+            return {
+                "response": LLMResponse(
+                    content=blocked_msg,
+                    model=version.model_name or settings.active_model,
+                ),
+                "attempts": 0,
+                "repaired": False,
+                "passed_contract": False,
+                "validation_errors": [in_guard["blocked_reason"]],
+                "input_sanitized": False,
+                "guardrail_report": {"input": in_guard, "output": None},
+            }
+        sanitized_input = in_guard["processed_input"]
+        was_sanitized = bool(in_guard["redactions"] or in_guard["warnings"])
+        guardrail_report = {"input": in_guard, "output": None}
+    elif sanitize_input and input_data:
         sanitized_input, was_sanitized = sanitize_untrusted_input(input_data)
 
     provider = get_provider()
@@ -183,6 +213,19 @@ def execute_with_harness(
         "cost_estimate": round(total_cost, 6),
     })
 
+    if enable_guardrails and not merged_response.error:
+        out_guard = check_output_guardrails(
+            merged_response.content,
+            system_prompt=system_prompt,
+            redact_pii=redact_pii,
+            banned_terms=banned_terms,
+        )
+        if guardrail_report is not None:
+            guardrail_report["output"] = out_guard
+        merged_response = merged_response.model_copy(update={"content": out_guard["processed_output"]})
+        if not out_guard["allowed"]:
+            violations = list(violations) + [out_guard["blocked_reason"]]
+
     return {
         "response": merged_response,
         "attempts": attempts,
@@ -190,6 +233,7 @@ def execute_with_harness(
         "passed_contract": len(violations) == 0 and not merged_response.error,
         "validation_errors": violations,
         "input_sanitized": was_sanitized,
+        "guardrail_report": guardrail_report,
     }
 
 
@@ -335,3 +379,4 @@ def main(argv: list[str] | None = None) -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
+
