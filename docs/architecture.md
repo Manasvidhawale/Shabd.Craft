@@ -27,6 +27,7 @@ Shabd.Craft is designed with strict separation of concerns between the UI, busin
 │  experiment_service.py   — experiment lifecycle         │
 │  export_service.py       — CSV/JSON & code export       │
 │  comparison_engine.py    — version comparison & diff    │
+│  guardrails.py           — PII, injection & leak checks │
 │  harness.py              — auto-repair & quality gate   │
 │                                                         │
 │  Technology: Python, Pydantic                           │

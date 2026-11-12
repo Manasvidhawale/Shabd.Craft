@@ -269,6 +269,24 @@ with left_col:
                 mw_raw = st.number_input("Max Words (0 = no limit)", 0, 5000, 0, key="ws_harness_mw")
                 harness_max_words = mw_raw if mw_raw > 0 else None
 
+        use_guardrails = st.checkbox(
+            "Enable Input/Output Guardrails (PII, Injection & Leak Filter)",
+            value=st.session_state.get("ws_use_guardrails", False),
+            help="Redacts PII/API keys, blocks prompt injections pre-execution, and blocks system prompt leaks.",
+        )
+        st.session_state["ws_use_guardrails"] = use_guardrails
+        guard_block_inj = True
+        guard_redact_pii = True
+        guard_banned = None
+        if use_guardrails:
+            gc1, gc2 = st.columns(2)
+            with gc1:
+                guard_block_inj = st.checkbox("Block prompt injection attempts", value=True, key="ws_guard_inj")
+            with gc2:
+                guard_redact_pii = st.checkbox("Auto-redact PII & API keys", value=True, key="ws_guard_pii")
+            banned_raw = st.text_input("Restricted Terms (comma-separated, optional)", key="ws_guard_banned")
+            guard_banned = [b.strip() for b in banned_raw.split(",") if b.strip()] if banned_raw else None
+
 # ── Right Pane: Preview, Results & Export ──────────────────────────────
 with right_col:
     tab_preview, tab_export = st.tabs(["Preview & Results", "Export Code"])
@@ -341,8 +359,17 @@ with right_col:
                     f"Harness Contract: **{status_str}** · Attempts: **{h_meta['attempts']}** · "
                     f"Auto-Repaired: **{repaired_str}**"
                 )
+                g_rep = h_meta.get("guardrail_report")
+                if g_rep:
+                    in_g = g_rep.get("input") or {}
+                    out_g = g_rep.get("output") or {}
+                    in_stat = "PASS" if in_g.get("allowed", True) else "BLOCKED"
+                    out_stat = "SKIPPED" if not out_g else ("PASS" if out_g.get("allowed", True) else "BLOCKED")
+                    redactions = (in_g.get("redactions") or []) + (out_g.get("redactions") or [])
+                    red_str = ", ".join(redactions) if redactions else "None"
+                    st.caption(f"Guardrails — Input: **{in_stat}** · Output: **{out_stat}** · Redactions: **{red_str}**")
                 if h_meta.get("input_sanitized"):
-                    st.info("Input sanitizer neutralized boundary-escape tags before execution.")
+                    st.info("Input sanitizer neutralized boundary-escape tags or redacted sensitive tokens before execution.")
                 for v_err in h_meta.get("validation_errors", []):
                     st.warning(v_err)
 
@@ -505,12 +532,17 @@ if run_clicked:
             few_shot_examples=few_shots,
         )
         with st.spinner("Executing prompt..."):
-            if use_harness:
+            if use_harness or use_guardrails:
                 h_res = execute_with_harness(
                     version,
                     input_data=sample_input,
                     required_keywords=harness_keywords,
                     max_words=harness_max_words,
+                    max_retries=None if use_harness else 0,
+                    enable_guardrails=use_guardrails,
+                    block_injection=guard_block_inj,
+                    redact_pii=guard_redact_pii,
+                    banned_terms=guard_banned,
                 )
                 response = h_res["response"]
                 resp_payload = response.model_dump()
@@ -520,6 +552,7 @@ if run_clicked:
                     "passed_contract": h_res["passed_contract"],
                     "validation_errors": h_res["validation_errors"],
                     "input_sanitized": h_res["input_sanitized"],
+                    "guardrail_report": h_res.get("guardrail_report"),
                 }
             else:
                 response = execute_prompt(version, input_data=sample_input)

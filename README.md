@@ -139,6 +139,7 @@ Shabd.Craft/
 │   ├── rule_based_evaluator.py     # Deterministic evaluation
 │   ├── llm_judge.py                # LLM-as-a-Judge evaluator
 │   ├── security_evaluator.py       # Prompt injection & defense audit
+│   ├── guardrails.py               # Input/output PII, injection & leak filters
 │   ├── harness.py                  # Runtime auto-repair & CI quality gate
 │   ├── ui_helpers.py               # Shared UI state & header helpers
 │   ├── optimizer.py                # Prompt optimization candidates
@@ -158,6 +159,7 @@ Shabd.Craft/
 │   ├── test_prompt_engine.py       # Template & prompt construction
 │   ├── test_evaluation.py          # Evaluation engine & rule-based
 │   ├── test_security_evaluator.py  # Prompt injection & hardening checks
+│   ├── test_guardrails.py          # PII redaction, injection & leak guardrails
 │   ├── test_harness.py             # Auto-repair harness, quality gate & CLI
 │   ├── test_comparison_engine.py   # Version comparison & word diff
 │   ├── test_export_service.py      # Production code generation
@@ -279,6 +281,7 @@ python -m src.harness --experiment "My Experiment" --min-score 75 --min-security
 | `test_prompt_engine.py` | 21 | Template engine, prompt construction, few-shot, CoT, decomposition |
 | `test_evaluation.py` | 18 | Weights, scoring, rule-based evaluator, aggregation |
 | `test_security_evaluator.py` | 9 | Prompt injection checks, static posture, hardening |
+| `test_guardrails.py` | 11 | Input/output PII redaction, injection blocking, leak filter |
 | `test_harness.py` | 11 | Input sanitization, auto-repair retries, quality gate & CLI |
 | `test_comparison_engine.py` | 4 | Version comparison, HTML word-level diff |
 | `test_export_service.py` | 2 | Production code generation (OpenAI SDK, LangChain, cURL) |
