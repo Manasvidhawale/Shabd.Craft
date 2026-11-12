@@ -12,7 +12,7 @@ sys.path.insert(0, str(Path(__file__).parent))
 
 import streamlit as st
 from src.config import settings
-from src.ui_helpers import get_database
+from src.ui_helpers import get_database, apply_user_settings_to_runtime
 
 _ASSETS_DIR = Path(__file__).parent / "assets"
 
@@ -291,6 +291,7 @@ def init_session_state() -> None:
 
 
 init_session_state()
+apply_user_settings_to_runtime()
 get_database()
 
 # ── Top-left Brand Logo & Navigation ───────────────────────────────────
