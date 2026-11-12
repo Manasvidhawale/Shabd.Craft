@@ -25,6 +25,7 @@ from src.schemas import (
     ExecutionStatus, CriterionScore, _new_id, _now,
 )
 from src.evaluation_engine import evaluate_batch, aggregate_results, calculate_weighted_score
+from src.harness import evaluate_quality_gate
 from src.security_evaluator import (
     run_security_audit, audit_prompt_defenses, harden_prompt_suggestion,
 )
@@ -221,6 +222,40 @@ with tab_results:
         rm2.metric("Successful", f"{agg['success']}/{agg['total']}")
         rm3.metric("Failed", agg["failed"])
         rm4.metric("Score Range", f"{agg['min_score']:.0f}–{agg['max_score']:.0f}")
+
+        with st.expander("Regression Quality Gate", expanded=False):
+            gc1, gc2, gc3 = st.columns(3)
+            with gc1:
+                min_avg_gate = st.number_input("Min Avg Score", 0.0, 100.0, 75.0, 5.0, key="gate_min_avg")
+            with gc2:
+                min_fmt_gate = st.number_input("Min Format Score", 0.0, 100.0, 80.0, 5.0, key="gate_min_fmt")
+            with gc3:
+                min_sec_gate = st.number_input("Min Security Score (%)", 0.0, 100.0, 80.0, 5.0, key="gate_min_sec")
+
+            sec_rep = st.session_state.get(f"sec_audit_{selected_ver_id}")
+            gate = evaluate_quality_gate(
+                existing_results,
+                security_report=sec_rep,
+                min_avg_score=min_avg_gate,
+                min_format_score=min_fmt_gate,
+                min_security_score=min_sec_gate,
+            )
+            if gate["passed"]:
+                st.success(f"Release Gate: {gate['status']} — All thresholds satisfied.")
+            else:
+                st.error(f"Release Gate: {gate['status']} — One or more thresholds failed.")
+            gate_rows = [
+                {
+                    "Assertion": c["name"],
+                    "Actual": c["actual"],
+                    "Threshold": c["threshold"],
+                    "Status": "PASS" if c["passed"] else "FAIL",
+                }
+                for c in gate["checks"]
+            ]
+            st.dataframe(pd.DataFrame(gate_rows), use_container_width=True, hide_index=True)
+            if sec_rep is None:
+                st.caption("Run Security Audit tab to include security robustness in the quality gate.")
 
         # Criterion chart
         if agg["criterion_averages"]:

@@ -15,6 +15,7 @@ import streamlit as st
 from src.config import settings
 from src.experiment_service import create_experiment_with_version
 from src.export_service import generate_production_code
+from src.harness import execute_with_harness
 from src.prompt_engine import TECHNIQUE_INFO, construct_prompt, execute_prompt
 from src.schemas import (
     FewShotExample,
@@ -250,6 +251,24 @@ with left_col:
         )
         st.session_state["ws_expected"] = expected
 
+        st.divider()
+        use_harness = st.checkbox(
+            "Enable Validation & Auto-Repair Harness",
+            value=st.session_state.get("ws_use_harness", False),
+            help="Validates output format/constraints and automatically retries on failure.",
+        )
+        st.session_state["ws_use_harness"] = use_harness
+        harness_keywords = None
+        harness_max_words = None
+        if use_harness:
+            hc1, hc2 = st.columns(2)
+            with hc1:
+                kw_raw = st.text_input("Required Keywords (comma-separated)", key="ws_harness_kw")
+                harness_keywords = [k.strip() for k in kw_raw.split(",") if k.strip()] if kw_raw else None
+            with hc2:
+                mw_raw = st.number_input("Max Words (0 = no limit)", 0, 5000, 0, key="ws_harness_mw")
+                harness_max_words = mw_raw if mw_raw > 0 else None
+
 # ── Right Pane: Preview, Results & Export ──────────────────────────────
 with right_col:
     tab_preview, tab_export = st.tabs(["Preview & Results", "Export Code"])
@@ -313,6 +332,19 @@ with right_col:
             rc2.metric("Tokens", resp.get("total_tokens", 0))
             cost_val = resp.get("cost_estimate", 0)
             rc3.metric("Cost", f"${cost_val:.5f}" if cost_val > 0 else "$0.00")
+
+            h_meta = resp.get("harness_meta")
+            if h_meta:
+                status_str = "PASS" if h_meta["passed_contract"] else "FAIL"
+                repaired_str = "Yes" if h_meta["repaired"] else "No"
+                st.caption(
+                    f"Harness Contract: **{status_str}** · Attempts: **{h_meta['attempts']}** · "
+                    f"Auto-Repaired: **{repaired_str}**"
+                )
+                if h_meta.get("input_sanitized"):
+                    st.info("Input sanitizer neutralized boundary-escape tags before execution.")
+                for v_err in h_meta.get("validation_errors", []):
+                    st.warning(v_err)
 
     with tab_export:
         st.markdown("##### Export Production Code")
@@ -473,12 +505,30 @@ if run_clicked:
             few_shot_examples=few_shots,
         )
         with st.spinner("Executing prompt..."):
-            response = execute_prompt(version, input_data=sample_input)
+            if use_harness:
+                h_res = execute_with_harness(
+                    version,
+                    input_data=sample_input,
+                    required_keywords=harness_keywords,
+                    max_words=harness_max_words,
+                )
+                response = h_res["response"]
+                resp_payload = response.model_dump()
+                resp_payload["harness_meta"] = {
+                    "attempts": h_res["attempts"],
+                    "repaired": h_res["repaired"],
+                    "passed_contract": h_res["passed_contract"],
+                    "validation_errors": h_res["validation_errors"],
+                    "input_sanitized": h_res["input_sanitized"],
+                }
+            else:
+                response = execute_prompt(version, input_data=sample_input)
+                resp_payload = response.model_dump()
 
         if response.error:
             st.error(f"Execution failed: {response.error}")
         else:
-            st.session_state["ws_last_response"] = response.model_dump()
+            st.session_state["ws_last_response"] = resp_payload
             st.rerun()
 
 if save_new_clicked:
