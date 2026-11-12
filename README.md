@@ -139,6 +139,8 @@ Shabd.Craft/
 │   ├── rule_based_evaluator.py     # Deterministic evaluation
 │   ├── llm_judge.py                # LLM-as-a-Judge evaluator
 │   ├── security_evaluator.py       # Prompt injection & defense audit
+│   ├── harness.py                  # Runtime auto-repair & CI quality gate
+│   ├── ui_helpers.py               # Shared UI state & header helpers
 │   ├── optimizer.py                # Prompt optimization candidates
 │   ├── comparison_engine.py        # Version comparison & diff helper
 │   ├── experiment_service.py       # Experiment lifecycle
@@ -156,6 +158,7 @@ Shabd.Craft/
 │   ├── test_prompt_engine.py       # Template & prompt construction
 │   ├── test_evaluation.py          # Evaluation engine & rule-based
 │   ├── test_security_evaluator.py  # Prompt injection & hardening checks
+│   ├── test_harness.py             # Auto-repair harness, quality gate & CLI
 │   ├── test_comparison_engine.py   # Version comparison & word diff
 │   ├── test_export_service.py      # Production code generation
 │   ├── test_optimizer.py           # Optimizer candidates & recommendation
@@ -264,6 +267,9 @@ py -m pytest tests/ -v -W error::DeprecationWarning
 
 # Run specific test file
 py -m pytest tests/test_evaluation.py -v
+
+# Run CLI regression harness gate for an experiment
+python -m src.harness --experiment "My Experiment" --min-score 75 --min-security 80
 ```
 
 **Test coverage:**
@@ -273,10 +279,11 @@ py -m pytest tests/test_evaluation.py -v
 | `test_prompt_engine.py` | 21 | Template engine, prompt construction, few-shot, CoT, decomposition |
 | `test_evaluation.py` | 18 | Weights, scoring, rule-based evaluator, aggregation |
 | `test_security_evaluator.py` | 9 | Prompt injection checks, static posture, hardening |
+| `test_harness.py` | 11 | Input sanitization, auto-repair retries, quality gate & CLI |
 | `test_comparison_engine.py` | 4 | Version comparison, HTML word-level diff |
 | `test_export_service.py` | 2 | Production code generation (OpenAI SDK, LangChain, cURL) |
 | `test_optimizer.py` | 16 | Candidate generation, JSON parsing, recommendation |
-| `test_database.py` | 15 | All SQLite CRUD operations |
+| `test_database.py` | 19 | All SQLite CRUD operations & version deletion |
 | `test_schemas.py` | 36 | All Pydantic schemas and validators |
 
 All tests run **without network access or API keys** (LLM calls are mocked).
