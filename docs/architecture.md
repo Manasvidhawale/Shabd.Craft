@@ -10,11 +10,11 @@ Shabd.Craft is designed with strict separation of concerns between the UI, busin
 ┌─────────────────────────────────────────────────────────┐
 │                    PRESENTATION LAYER                    │
 │                                                         │
-│  app.py (Landing Dashboard)                             │
-│  pages/1_Dashboard.py       pages/5_Compare_Versions   │
-│  pages/2_Prompt_Workshop    pages/6_Experiment_History  │
-│  pages/3_Evaluation_Lab     pages/7_Prompt_Library      │
-│  pages/4_Prompt_Optimizer   pages/8_Settings            │
+│  app.py (Navigation Shell & Global Theme)               │
+│  views/0_Home               views/4_Compare_Versions    │
+│  views/1_Prompt_Workshop    views/5_Experiment_History  │
+│  views/2_Evaluation_Lab     views/6_Prompt_Library      │
+│  views/3_Prompt_Optimizer   views/7_Settings            │
 │                                                         │
 │  Technology: Streamlit + Plotly + Custom CSS            │
 └────────────────────────┬────────────────────────────────┘
@@ -25,8 +25,10 @@ Shabd.Craft is designed with strict separation of concerns between the UI, busin
 │                    SERVICE LAYER                         │
 │                                                         │
 │  experiment_service.py   — experiment lifecycle         │
-│  export_service.py       — CSV/JSON import & export     │
-│  comparison_engine.py    — version comparison           │
+│  export_service.py       — CSV/JSON & code export       │
+│  comparison_engine.py    — version comparison & diff    │
+│  guardrails.py           — PII, injection & leak checks │
+│  harness.py              — auto-repair & quality gate   │
 │                                                         │
 │  Technology: Python, Pydantic                           │
 └────────────────────────┬────────────────────────────────┘
@@ -43,6 +45,8 @@ Shabd.Craft is designed with strict separation of concerns between the UI, busin
 │ engine.py    │  │evaluator  │  │               │
 │              │  │           │  │               │
 │              │  │llm_judge  │  │               │
+│              │  │security_  │  │               │
+│              │  │evaluator  │  │               │
 └──────┬───────┘  └─────┬─────┘  └───────┬───────┘
        │                │                │
        └────────────────┼────────────────┘

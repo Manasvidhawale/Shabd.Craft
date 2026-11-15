@@ -13,7 +13,12 @@ import json
 import pandas as pd
 import plotly.graph_objects as go
 from src.config import settings
-from src.database import Database
+from src.ui_helpers import (
+    get_active_eval_weights,
+    get_database,
+    render_empty_experiment_state,
+    render_page_header,
+)
 from src.schemas import (
     PromptVersion, TestCase, EvaluationWeights, EvaluationResult,
     EvaluationMethod, ExecutionStatus, PromptingTechnique, OutputFormat,
@@ -22,32 +27,27 @@ from src.schemas import (
 from src.optimizer import generate_candidates, recommend_best
 from src.evaluation_engine import evaluate_batch, aggregate_results
 
-st.set_page_config(page_title="Prompt Optimizer — Shabd.Craft", page_icon="✦", layout="wide")
+db = get_database()
 
-@st.cache_resource
-def get_db():
-    return Database(settings.db_path)
-
-db = get_db()
-
-st.markdown("## ⚡ Prompt Optimizer")
-st.caption("Generate improved prompt candidates, test them, and compare results.")
-
-if settings.is_demo_mode:
-    st.markdown('<span style="display:inline-block;padding:3px 10px;border-radius:20px;font-size:0.72rem;font-weight:600;background:rgba(251,191,36,0.15);color:#fbbf24;border:1px solid rgba(251,191,36,0.3);">⚡ Demo Mode — optimization uses simulated responses</span>', unsafe_allow_html=True)
-
-st.divider()
+render_page_header("Prompt Optimizer", "Generate improved prompt candidates, benchmark them, and promote winners.")
 
 # ── Select experiment & version ────────────────────────────────────────
 experiments = db.list_experiments()
 if not experiments:
-    st.info("Create and evaluate an experiment first.")
-    if st.button("✦ Go to Prompt Workshop", type="primary"):
-        st.switch_page("pages/2_Prompt_Workshop.py")
+    render_empty_experiment_state("Create and evaluate a prompt first.")
     st.stop()
 
-exp_opts = {e["id"]: e["name"] for e in experiments}
-sel_exp = st.selectbox("Experiment", list(exp_opts.keys()), format_func=lambda x: exp_opts[x])
+exp_opts = {e["id"]: f"{e['name']} ({e['category'].replace('_', ' ').title()})" for e in experiments}
+default_exp = st.session_state.get("current_experiment_id", experiments[0]["id"])
+if default_exp not in exp_opts:
+    default_exp = experiments[0]["id"]
+
+sel_c1, sel_c2 = st.columns(2)
+with sel_c1:
+    sel_exp = st.selectbox("Experiment", list(exp_opts.keys()),
+                           format_func=lambda x: exp_opts[x],
+                           index=list(exp_opts.keys()).index(default_exp))
+    st.session_state["current_experiment_id"] = sel_exp
 
 versions = db.get_prompt_versions(sel_exp)
 if not versions:
@@ -55,12 +55,20 @@ if not versions:
     st.stop()
 
 ver_opts = {v["id"]: f"v{v['version_number']}: {v['version_label']}" for v in versions}
-sel_ver = st.selectbox("Base Prompt Version", list(ver_opts.keys()), format_func=lambda x: ver_opts[x])
+default_ver = st.session_state.get("current_version_id", versions[0]["id"])
+if default_ver not in ver_opts:
+    default_ver = versions[0]["id"]
+with sel_c2:
+    sel_ver = st.selectbox("Base Prompt Version", list(ver_opts.keys()),
+                           format_func=lambda x: ver_opts[x],
+                           index=list(ver_opts.keys()).index(default_ver))
+    st.session_state["current_version_id"] = sel_ver
 
 ver_data = db.get_prompt_version(sel_ver)
+existing_candidates = db.get_optimization_candidates(sel_exp)
 
-# Show current prompt
-with st.expander("📄 Current Prompt", expanded=True):
+# Show current prompt (collapse automatically once candidates exist)
+with st.expander("Current Prompt", expanded=not bool(existing_candidates)):
     if ver_data.get("system_prompt"):
         st.markdown("**System:**")
         st.code(ver_data["system_prompt"], language="text")
@@ -84,7 +92,7 @@ st.markdown("##### Generate Optimization Candidates")
 
 num_cands = st.slider("Number of candidates", 1, 3, 3)
 
-if st.button("⚡ Generate Candidates", type="primary", use_container_width=True):
+if st.button("Generate Candidates", type="primary", use_container_width=True):
     if not ver_data:
         st.error("Version not found.")
     else:
@@ -141,8 +149,8 @@ if existing_candidates:
     st.markdown("##### Optimization Candidates")
 
     for i, cand in enumerate(existing_candidates):
-        status_icon = {"pending": "⏳", "success": "✅", "failed": "❌"}.get(cand["status"], "⏳")
-        with st.expander(f"{status_icon} {cand['candidate_label']} — {cand['strategy']}", expanded=(i == 0)):
+        status_label = {"pending": "[PENDING]", "success": "[TESTED]", "failed": "[REMOVED]"}.get(cand["status"], "[PENDING]")
+        with st.expander(f"{status_label} {cand['candidate_label']} — {cand['strategy']}", expanded=(i == 0)):
             st.markdown(f"**Strategy:** {cand['strategy']}")
             st.markdown(f"**Changes:** {cand['changes_description']}")
             st.markdown(f"**Rationale:** {cand['rationale']}")
@@ -160,7 +168,7 @@ if existing_candidates:
             ac1, ac2, ac3 = st.columns(3)
             with ac1:
                 if cand["status"] == "pending":
-                    if st.button("▶ Test Candidate", key=f"test_{cand['id']}"):
+                    if st.button("Test Candidate", key=f"test_{cand['id']}"):
                         test_cases = db.get_test_cases(sel_exp)
                         if not test_cases:
                             st.error("No test cases available.")
@@ -186,7 +194,7 @@ if existing_candidates:
                             tc_objects = [TestCase(id=tc["id"], input_data=tc["input_data"],
                                                    expected_output=tc.get("expected_output", ""))
                                          for tc in test_cases]
-                            weights = EvaluationWeights()
+                            weights = get_active_eval_weights()
 
                             with st.spinner(f"Testing {cand['candidate_label']}..."):
                                 eval_results = evaluate_batch(
@@ -207,13 +215,13 @@ if existing_candidates:
 
             with ac2:
                 if cand["status"] == "success" and not cand.get("is_accepted"):
-                    if st.button("✅ Accept", key=f"accept_{cand['id']}"):
+                    if st.button("Accept", key=f"accept_{cand['id']}"):
                         db.accept_candidate(cand["id"])
-                        st.success("Candidate accepted!")
+                        st.success("Candidate accepted.")
                         st.rerun()
 
             with ac3:
-                if st.button("🗑 Remove", key=f"remove_{cand['id']}"):
+                if st.button("Remove", key=f"remove_{cand['id']}"):
                     # Just mark as rejected - data preserved
                     db.update_candidate_score(cand["id"], cand.get("overall_score", 0), "failed")
                     st.rerun()
@@ -229,9 +237,9 @@ if existing_candidates:
         rec = recommend_best(original_avg, tested, len(test_cases))
 
         if rec["improvement"]:
-            st.success(f"✅ {rec['recommendation']}")
+            st.success(rec["recommendation"])
         else:
-            st.info(f"ℹ {rec['recommendation']}")
+            st.info(rec["recommendation"])
 
         if rec["limitations"]:
             st.caption("**Limitations:** " + " · ".join(rec["limitations"]))

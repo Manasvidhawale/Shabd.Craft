@@ -36,6 +36,7 @@ class PromptingTechnique(str, Enum):
     ROLE_BASED = "role_based"
     STRUCTURED_OUTPUT = "structured_output"
     TASK_DECOMPOSITION = "task_decomposition"
+    CHAIN_OF_THOUGHT = "chain_of_thought"
 
 
 class ExecutionStatus(str, Enum):

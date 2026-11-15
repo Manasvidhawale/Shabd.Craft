@@ -12,34 +12,44 @@ import streamlit as st
 import json
 import pandas as pd
 import plotly.graph_objects as go
-from src.config import settings
-from src.database import Database
-from src.comparison_engine import compare_versions, get_side_by_side_outputs
+from src.ui_helpers import (
+    get_database,
+    render_empty_experiment_state,
+    render_page_header,
+)
+from src.comparison_engine import (
+    compare_versions, get_side_by_side_outputs, build_word_diff_html,
+)
 
-st.set_page_config(page_title="Compare Versions — Shabd.Craft", page_icon="✦", layout="wide")
+db = get_database()
 
-@st.cache_resource
-def get_db():
-    return Database(settings.db_path)
-
-db = get_db()
-
-st.markdown("## 🔀 Compare Versions")
-st.caption("Side-by-side comparison of prompt versions with shared test cases.")
-st.divider()
+render_page_header("Compare Versions", "Inspect word-level prompt changes, metric deltas, and test case outputs.")
 
 # ── Select experiment ──────────────────────────────────────────────────
 experiments = db.list_experiments()
 if not experiments:
-    st.info("No experiments available. Create one in the Prompt Workshop.")
+    render_empty_experiment_state("No prompts available yet. Create one in the Prompt Workshop.")
     st.stop()
 
-exp_opts = {e["id"]: e["name"] for e in experiments}
-sel_exp = st.selectbox("Experiment", list(exp_opts.keys()), format_func=lambda x: exp_opts[x])
+exp_opts = {e["id"]: f"{e['name']} ({e['category'].replace('_', ' ').title()})" for e in experiments}
+default_exp = st.session_state.get("current_experiment_id", experiments[0]["id"])
+if default_exp not in exp_opts:
+    default_exp = experiments[0]["id"]
+sel_exp = st.selectbox("Experiment", list(exp_opts.keys()),
+                       format_func=lambda x: exp_opts[x],
+                       index=list(exp_opts.keys()).index(default_exp))
+st.session_state["current_experiment_id"] = sel_exp
 
 versions = db.get_prompt_versions(sel_exp)
 if len(versions) < 2:
-    st.info("Need at least 2 prompt versions to compare. Use the Optimizer to generate alternatives.")
+    st.info("This experiment only has 1 prompt version. Save a second version in Prompt Workshop or generate candidates in Prompt Optimizer to compare.")
+    cb1, cb2 = st.columns(2)
+    with cb1:
+        if st.button("Add Version in Workshop", type="primary", use_container_width=True):
+            st.switch_page("views/1_Prompt_Workshop.py")
+    with cb2:
+        if st.button("Open Prompt Optimizer", use_container_width=True):
+            st.switch_page("views/3_Prompt_Optimizer.py")
     st.stop()
 
 # ── Select two versions ───────────────────────────────────────────────
@@ -61,25 +71,47 @@ vb_data = db.get_prompt_version(ver_b)
 
 st.divider()
 
-# ── A. Side-by-Side Prompt Text ────────────────────────────────────────
+# ── A. Side-by-Side & Word-Level Diff ──────────────────────────────────
 st.markdown("##### Prompt Comparison")
 
-pa, pb = st.columns(2)
-with pa:
-    st.markdown(f"**{ver_opts[ver_a]}**")
-    if va_data.get("system_prompt"):
-        st.caption("System:")
-        st.code(va_data["system_prompt"], language="text")
-    st.caption("User Prompt:")
-    st.code(va_data["user_prompt_template"], language="text")
+tab_diff, tab_side = st.tabs(["Inline Diff (A -> B)", "Side-by-Side"])
 
-with pb:
-    st.markdown(f"**{ver_opts[ver_b]}**")
-    if vb_data.get("system_prompt"):
-        st.caption("System:")
-        st.code(vb_data["system_prompt"], language="text")
-    st.caption("User Prompt:")
-    st.code(vb_data["user_prompt_template"], language="text")
+with tab_diff:
+    st.caption("Red strikethrough = removed from Version A | Green highlight = added in Version B")
+    sys_a = va_data.get("system_prompt", "") or ""
+    sys_b = vb_data.get("system_prompt", "") or ""
+    if sys_a or sys_b:
+        st.markdown("**System Prompt Diff:**")
+        if sys_a == sys_b:
+            st.caption("No changes in system prompt.")
+        else:
+            st.markdown(build_word_diff_html(sys_a, sys_b), unsafe_allow_html=True)
+
+    st.markdown("**User Prompt Diff:**")
+    usr_a = va_data.get("user_prompt_template", "") or ""
+    usr_b = vb_data.get("user_prompt_template", "") or ""
+    if usr_a == usr_b:
+        st.caption("No changes in user prompt template.")
+    else:
+        st.markdown(build_word_diff_html(usr_a, usr_b), unsafe_allow_html=True)
+
+with tab_side:
+    pa, pb = st.columns(2)
+    with pa:
+        st.markdown(f"**{ver_opts[ver_a]}**")
+        if va_data.get("system_prompt"):
+            st.caption("System:")
+            st.code(va_data["system_prompt"], language="text")
+        st.caption("User Prompt:")
+        st.code(va_data["user_prompt_template"], language="text")
+
+    with pb:
+        st.markdown(f"**{ver_opts[ver_b]}**")
+        if vb_data.get("system_prompt"):
+            st.caption("System:")
+            st.code(vb_data["system_prompt"], language="text")
+        st.caption("User Prompt:")
+        st.code(vb_data["user_prompt_template"], language="text")
 
 # ── Get results ────────────────────────────────────────────────────────
 results_a = db.get_evaluation_results(sel_exp, ver_a)
@@ -106,9 +138,9 @@ with sc3:
     diff = comparison.version_a_overall - comparison.version_b_overall
     st.markdown("**Difference**")
     if diff > 0:
-        st.markdown(f"<span style='color:#34d399;font-size:1.5rem;font-weight:700;'>+{diff:.1f}</span> ← A", unsafe_allow_html=True)
+        st.markdown(f"<span style='color:#34d399;font-size:1.5rem;font-weight:700;'>+{diff:.1f}</span> ({comparison.version_a_label})", unsafe_allow_html=True)
     elif diff < 0:
-        st.markdown(f"<span style='color:#34d399;font-size:1.5rem;font-weight:700;'>+{-diff:.1f}</span> ← B", unsafe_allow_html=True)
+        st.markdown(f"<span style='color:#34d399;font-size:1.5rem;font-weight:700;'>+{-diff:.1f}</span> ({comparison.version_b_label})", unsafe_allow_html=True)
     else:
         st.markdown("<span style='color:#9ba3b5;font-size:1.5rem;font-weight:700;'>Tied</span>", unsafe_allow_html=True)
 
@@ -145,9 +177,12 @@ if comparison.version_a_scores and comparison.version_b_scores:
 # ── D. Response Comparison ─────────────────────────────────────────────
 side_by_side = get_side_by_side_outputs(results_a, results_b)
 if side_by_side:
+    tc_map = {tc["id"]: tc.get("input_data", "") for tc in db.get_test_cases(sel_exp)}
     st.markdown("##### Output Comparison (by test case)")
-    for row in side_by_side[:10]:
-        with st.expander(f"TC: {row['test_case_id'][:8]}… — A: {row['score_a']:.0f} vs B: {row['score_b']:.0f}"):
+    for idx, row in enumerate(side_by_side[:10], 1):
+        tc_preview = tc_map.get(row["test_case_id"], "").replace("\n", " ")
+        tc_label = (tc_preview[:55] + "…") if len(tc_preview) > 55 else (tc_preview or f"Case {idx}")
+        with st.expander(f"TC {idx}: {tc_label} — A: {row['score_a']:.0f} vs B: {row['score_b']:.0f}"):
             oa, ob = st.columns(2)
             with oa:
                 st.markdown(f"**{comparison.version_a_label}** (Score: {row['score_a']:.1f})")

@@ -17,6 +17,7 @@ eggs/
 venv/
 .venv/
 env/
+.env
 
 # IDE
 .vscode/

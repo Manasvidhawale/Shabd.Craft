@@ -80,6 +80,16 @@ TECHNIQUE_INFO = {
             "Feedback: \"{{customer_feedback}}\""
         ),
     },
+    PromptingTechnique.CHAIN_OF_THOUGHT: {
+        "name": "Chain-of-Thought (CoT)",
+        "description": "Elicit explicit step-by-step reasoning from the model before it produces a final answer. Best for logic, math, and multi-step inference.",
+        "example_system": "You are a careful, logical assistant. Always explain your reasoning step by step before stating your conclusion.",
+        "example_user": (
+            "Determine whether the customer qualifies for a priority refund based on these facts:\n"
+            "\"{{input_text}}\"\n\n"
+            "Think through this step by step. Show your reasoning clearly before giving your final answer."
+        ),
+    },
 }
 
 
@@ -144,6 +154,25 @@ def construct_prompt(
         few_shot_section = build_few_shot_section(version.few_shot_examples)
         if few_shot_section:
             user_prompt = few_shot_section + user_prompt
+
+    # Apply Task Decomposition scaffold if user didn't write explicit steps
+    if version.technique == PromptingTechnique.TASK_DECOMPOSITION:
+        lower = user_prompt.lower()
+        if not any(marker in lower for marker in ("step 1", "1.", "subtask")):
+            scaffold = (
+                "Complete this task sequentially in clear steps:\n"
+                "Step 1: Identify the core objective and inputs.\n"
+                "Step 2: Analyze the details systematically.\n"
+                "Step 3: Synthesize the final response.\n\n"
+                "Task:\n"
+            )
+            user_prompt = scaffold + user_prompt
+
+    # Apply Chain-of-Thought reasoning elicitation if not already present
+    if version.technique == PromptingTechnique.CHAIN_OF_THOUGHT:
+        lower = user_prompt.lower()
+        if "step by step" not in lower and "step-by-step" not in lower:
+            user_prompt += "\n\nThink through this step by step. Show your reasoning clearly before giving your final answer."
 
     # Add output format instruction
     format_instruction = build_output_format_instruction(version.output_format)

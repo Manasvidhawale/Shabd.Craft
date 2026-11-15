@@ -2,31 +2,29 @@
 Shabd.Craft — Main Application Entry Point
 
 Intelligent Prompt Engineering & Optimization Platform.
+Unified navigation shell, global theme styles, and shared sidebar.
 """
 
 import sys
 from pathlib import Path
 
-# Add project root to path for imports
 sys.path.insert(0, str(Path(__file__).parent))
 
 import streamlit as st
-import json
 from src.config import settings
-from src.database import Database
-from src.schemas import PromptTemplate, FewShotExample, TaskCategory, PromptingTechnique, OutputFormat
+from src.ui_helpers import get_database, apply_user_settings_to_runtime
 
-# ── Page Config ────────────────────────────────────────────────────────
+_ASSETS_DIR = Path(__file__).parent / "assets"
 
+# ── Page Config (called once for the whole app) ────────────────────────
 st.set_page_config(
     page_title="Shabd.Craft — Prompt Engineering Platform",
-    page_icon="✦",
+    page_icon=str(_ASSETS_DIR / "icon.svg"),
     layout="wide",
     initial_sidebar_state="expanded",
 )
 
-# ── Global Styles ──────────────────────────────────────────────────────
-
+# ── Global Styles (applied consistently across every page) ─────────────
 st.markdown("""
 <style>
 @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap');
@@ -55,32 +53,61 @@ st.markdown("""
     font-family: 'Inter', -apple-system, sans-serif;
 }
 
+.block-container {
+    padding-top: 2rem !important;
+    padding-bottom: 2.5rem !important;
+}
+
 /* Sidebar */
 section[data-testid="stSidebar"] {
     background-color: var(--bg-secondary);
     border-right: 1px solid var(--border-color);
 }
 
-section[data-testid="stSidebar"] .stMarkdown h1 {
-    font-size: 1.4rem;
-    font-weight: 700;
-    letter-spacing: -0.02em;
-    background: linear-gradient(135deg, var(--accent-violet), var(--accent-cyan));
-    -webkit-background-clip: text;
-    -webkit-text-fill-color: transparent;
+[data-testid="stSidebarNav"] {
+    padding-top: 0.25rem !important;
+}
+
+[data-testid="stSidebarNavItems"] {
+    max-height: none !important;
+    overflow-y: visible !important;
+}
+
+[data-testid="stSidebarNavSeparator"] {
+    margin: 0.4rem 0 !important;
+}
+
+section[data-testid="stSidebar"] details[data-testid="stExpander"] {
+    background: transparent !important;
+    border: none !important;
+    margin-bottom: 0.2rem;
+}
+
+section[data-testid="stSidebar"] details[data-testid="stExpander"] summary {
+    padding: 0.35rem 0.4rem !important;
+    font-size: 0.8rem !important;
+    font-weight: 600 !important;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    color: var(--text-secondary) !important;
+}
+
+section[data-testid="stSidebar"] [data-testid="stPageLink-NavLink"] {
+    padding: 0.35rem 0.65rem !important;
+    border-radius: 8px !important;
 }
 
 /* Metric cards */
 div[data-testid="stMetric"] {
     background: var(--bg-card);
     border: 1px solid var(--border-color);
-    border-radius: 12px;
-    padding: 16px 20px;
+    border-radius: 10px;
+    padding: 14px 18px;
 }
 
 div[data-testid="stMetric"] label {
     color: var(--text-secondary) !important;
-    font-size: 0.78rem;
+    font-size: 0.75rem;
     text-transform: uppercase;
     letter-spacing: 0.05em;
     font-weight: 500;
@@ -89,15 +116,16 @@ div[data-testid="stMetric"] label {
 div[data-testid="stMetric"] div[data-testid="stMetricValue"] {
     color: var(--text-primary) !important;
     font-weight: 700;
-    font-size: 1.6rem;
+    font-size: 1.5rem;
 }
 
-/* Tabs */
+/* Tabs: override default red highlight bar with accent violet */
 .stTabs [data-baseweb="tab-list"] {
     gap: 4px;
     background: var(--bg-secondary);
     border-radius: 10px;
     padding: 4px;
+    border: 1px solid var(--border-color);
 }
 
 .stTabs [data-baseweb="tab"] {
@@ -105,11 +133,16 @@ div[data-testid="stMetric"] div[data-testid="stMetricValue"] {
     font-weight: 500;
     font-size: 0.85rem;
     color: var(--text-secondary);
+    padding: 6px 14px;
 }
 
 .stTabs [aria-selected="true"] {
     background: var(--accent-violet-dim);
-    color: var(--accent-violet) !important;
+    color: var(--text-primary) !important;
+}
+
+.stTabs [data-baseweb="tab-highlight"] {
+    background-color: var(--accent-violet) !important;
 }
 
 /* Buttons */
@@ -117,7 +150,8 @@ div[data-testid="stMetric"] div[data-testid="stMetricValue"] {
     border-radius: 8px;
     font-weight: 500;
     font-size: 0.85rem;
-    transition: all 0.2s ease;
+    border-color: var(--border-color);
+    transition: all 0.15s ease;
 }
 
 .stButton > button[kind="primary"] {
@@ -127,8 +161,7 @@ div[data-testid="stMetric"] div[data-testid="stMetricValue"] {
 }
 
 .stButton > button:hover {
-    transform: translateY(-1px);
-    box-shadow: 0 4px 12px rgba(124, 92, 252, 0.25);
+    border-color: var(--accent-violet);
 }
 
 /* Text inputs and areas */
@@ -150,12 +183,16 @@ div[data-testid="stMetric"] div[data-testid="stMetricValue"] {
     background: var(--bg-card);
 }
 
+/* Progress bar */
+.stProgress > div > div > div > div {
+    background-color: var(--accent-violet);
+}
+
 /* Expander */
-.streamlit-expanderHeader {
+details[data-testid="stExpander"] {
     background: var(--bg-card);
-    border-radius: 8px;
+    border-radius: 10px;
     border: 1px solid var(--border-color);
-    font-weight: 500;
 }
 
 /* Dataframe */
@@ -167,23 +204,23 @@ div[data-testid="stMetric"] div[data-testid="stMetricValue"] {
 /* Custom classes */
 .shabd-hero {
     text-align: center;
-    padding: 2rem 0 1.5rem;
+    padding: 1.25rem 0 1rem;
 }
 
 .shabd-hero h1 {
-    font-size: 2.6rem;
+    font-size: 2.3rem;
     font-weight: 800;
     letter-spacing: -0.03em;
     line-height: 1.15;
     background: linear-gradient(135deg, var(--accent-violet), var(--accent-cyan));
     -webkit-background-clip: text;
     -webkit-text-fill-color: transparent;
-    margin-bottom: 0.5rem;
+    margin-bottom: 0.4rem;
 }
 
 .shabd-hero p {
     color: var(--text-secondary);
-    font-size: 1.05rem;
+    font-size: 1rem;
     max-width: 600px;
     margin: 0 auto;
     font-weight: 400;
@@ -214,9 +251,9 @@ div[data-testid="stMetric"] div[data-testid="stMetricValue"] {
 .card-surface {
     background: var(--bg-card);
     border: 1px solid var(--border-color);
-    border-radius: 12px;
-    padding: 1.25rem;
-    margin-bottom: 1rem;
+    border-radius: 10px;
+    padding: 1.1rem;
+    margin-bottom: 0.6rem;
 }
 
 .card-surface:hover {
@@ -243,61 +280,16 @@ div[data-testid="stMetric"] div[data-testid="stMetricValue"] {
     margin-bottom: 0.5rem;
 }
 
-.mono-text {
-    font-family: 'JetBrains Mono', monospace;
-    font-size: 0.85rem;
-}
-
-/* Hide default streamlit footer & header */
+/* Keep sidebar toggle accessible while hiding Deploy button & footer */
 #MainMenu {visibility: hidden;}
 footer {visibility: hidden;}
-header {visibility: hidden;}
+[data-testid="stAppDeployButton"] {display: none;}
+[data-testid="stHeader"] {background: transparent;}
 </style>
 """, unsafe_allow_html=True)
 
 # ── Initialize Database & State ────────────────────────────────────────
-
-@st.cache_resource
-def get_database():
-    db = Database(settings.db_path)
-    _seed_builtin_templates(db)
-    return db
-
-
-def _seed_builtin_templates(db: Database):
-    """Seed built-in prompt templates on first run."""
-    existing = db.get_prompt_templates(builtin_only=True)
-    if existing:
-        return
-
-    data_path = Path(__file__).parent / "data" / "sample_prompts.json"
-    if not data_path.exists():
-        return
-
-    with open(data_path, "r") as f:
-        data = json.load(f)
-
-    for t in data.get("builtin_templates", []):
-        examples = [FewShotExample(**e) for e in t.get("few_shot_examples", [])]
-        template = PromptTemplate(
-            name=t["name"],
-            description=t.get("description", ""),
-            category=TaskCategory(t.get("category", "general")),
-            system_prompt=t.get("system_prompt", ""),
-            user_prompt_template=t["user_prompt_template"],
-            variables=t.get("variables", []),
-            technique=PromptingTechnique(t.get("technique", "zero_shot")),
-            few_shot_examples=examples,
-            output_format=OutputFormat(t.get("output_format", "text")),
-            example_input=t.get("example_input", ""),
-            example_output=t.get("example_output", ""),
-            eval_criteria=t.get("eval_criteria", {}),
-            is_builtin=True,
-        )
-        db.save_prompt_template(template)
-
-
-def init_session_state():
+def init_session_state() -> None:
     """Initialize session state with defaults."""
     defaults = {
         "current_experiment_id": None,
@@ -319,212 +311,33 @@ def init_session_state():
 
 
 init_session_state()
-db = get_database()
+apply_user_settings_to_runtime()
+get_database()
 
-# ── Sidebar ────────────────────────────────────────────────────────────
+# ── Top-left Brand Logo & Navigation ───────────────────────────────────
+st.logo(str(_ASSETS_DIR / "logo.svg"), icon_image=str(_ASSETS_DIR / "icon.svg"))
+
+workflow_pages = [
+    st.Page("views/0_Home.py", title="Home", default=True),
+    st.Page("views/1_Prompt_Workshop.py", title="Prompt Workshop"),
+    st.Page("views/2_Evaluation_Lab.py", title="Evaluation Lab"),
+    st.Page("views/3_Prompt_Optimizer.py", title="Prompt Optimizer"),
+    st.Page("views/4_Compare_Versions.py", title="Compare Versions"),
+]
+manage_pages = [
+    st.Page("views/5_Experiment_History.py", title="Experiment History"),
+    st.Page("views/6_Prompt_Library.py", title="Prompt Library"),
+    st.Page("views/7_Settings.py", title="Settings"),
+]
+
+pg = st.navigation(workflow_pages + manage_pages, position="hidden")
 
 with st.sidebar:
-    st.markdown("# ✦ Shabd.Craft")
-    st.caption("Craft Better Prompts. Measure Better Intelligence.")
-    st.divider()
+    with st.expander("Workflow", expanded=True):
+        for p in workflow_pages:
+            st.page_link(p, label=p.title)
+    with st.expander("Manage", expanded=True):
+        for p in manage_pages:
+            st.page_link(p, label=p.title)
 
-    # Mode badge
-    if settings.is_demo_mode:
-        st.markdown('<span class="status-badge badge-demo">⚡ Demo Mode</span>', unsafe_allow_html=True)
-    else:
-        st.markdown('<span class="status-badge badge-live">● Live Mode</span>', unsafe_allow_html=True)
-
-    st.caption(f"Provider: **{settings.active_provider}** · Model: **{settings.active_model}**")
-    st.divider()
-
-# ── Main Content — Overview Dashboard ──────────────────────────────────
-
-# Header
-st.markdown("""
-<div class="shabd-hero">
-    <h1>Shabd.Craft</h1>
-    <p>From raw instructions to tested intelligence — design, evaluate, and optimize your prompts.</p>
-</div>
-""", unsafe_allow_html=True)
-
-# Quick actions
-col_a, col_b, col_c = st.columns([1, 1, 1])
-with col_a:
-    if st.button("✦ Start Crafting", use_container_width=True, type="primary"):
-        st.switch_page("pages/2_Prompt_Workshop.py")
-with col_b:
-    if st.button("📚 Prompt Library", use_container_width=True):
-        st.switch_page("pages/7_Prompt_Library.py")
-with col_c:
-    if st.button("⚙ Settings", use_container_width=True):
-        st.switch_page("pages/8_Settings.py")
-
-st.markdown("")
-
-# Dashboard Metrics
-metrics = db.get_dashboard_metrics()
-
-st.markdown('<p class="section-label">Experiment Overview</p>', unsafe_allow_html=True)
-m1, m2, m3, m4, m5, m6 = st.columns(6)
-m1.metric("Experiments", metrics["total_experiments"])
-m2.metric("Prompt Versions", metrics["total_versions"])
-m3.metric("Test Cases Run", metrics["total_test_cases"])
-m4.metric("Avg Score", f"{metrics['avg_score']:.1f}" if metrics["avg_score"] else "—")
-m5.metric("Optimizations", metrics["optimization_count"])
-m6.metric("Best Prompt", metrics["best_prompt"][:20] + "…" if len(metrics["best_prompt"]) > 20 else (metrics["best_prompt"] or "—"))
-
-st.markdown("")
-
-# Charts & Recent Experiments
-if metrics["total_experiments"] > 0:
-    import plotly.graph_objects as go
-    import plotly.express as px
-
-    col_chart1, col_chart2 = st.columns(2)
-
-    # Score Distribution
-    all_scores = db.get_all_evaluation_scores()
-    if all_scores:
-        with col_chart1:
-            st.markdown('<p class="section-label">Score Distribution</p>', unsafe_allow_html=True)
-            score_values = [s["overall_score"] for s in all_scores]
-            fig = go.Figure(data=[go.Histogram(
-                x=score_values, nbinsx=20,
-                marker_color="#7c5cfc",
-                marker_line_color="#6344e0",
-                marker_line_width=1,
-            )])
-            fig.update_layout(
-                paper_bgcolor="rgba(0,0,0,0)",
-                plot_bgcolor="rgba(0,0,0,0)",
-                font=dict(color="#9ba3b5", family="Inter"),
-                xaxis_title="Score",
-                yaxis_title="Count",
-                margin=dict(l=40, r=20, t=20, b=40),
-                height=280,
-                xaxis=dict(gridcolor="#2a2d3e"),
-                yaxis=dict(gridcolor="#2a2d3e"),
-            )
-            st.plotly_chart(fig, use_container_width=True)
-
-    # Criteria Averages
-    criterion_avgs = db.get_criterion_averages()
-    if criterion_avgs:
-        with col_chart2:
-            st.markdown('<p class="section-label">Evaluation Criteria Averages</p>', unsafe_allow_html=True)
-            labels = [k.replace("_", " ").title() for k in criterion_avgs.keys()]
-            values = list(criterion_avgs.values())
-            fig = go.Figure(data=[go.Bar(
-                x=labels, y=values,
-                marker_color=["#7c5cfc", "#8b6fff", "#9b82ff", "#22d3ee", "#34d399"],
-                text=[f"{v:.0f}" for v in values],
-                textposition="outside",
-            )])
-            fig.update_layout(
-                paper_bgcolor="rgba(0,0,0,0)",
-                plot_bgcolor="rgba(0,0,0,0)",
-                font=dict(color="#9ba3b5", family="Inter"),
-                yaxis_title="Average Score",
-                margin=dict(l=40, r=20, t=20, b=40),
-                height=280,
-                yaxis=dict(range=[0, 105], gridcolor="#2a2d3e"),
-                xaxis=dict(gridcolor="#2a2d3e"),
-            )
-            st.plotly_chart(fig, use_container_width=True)
-
-    # Recent Experiments
-    st.markdown('<p class="section-label">Recent Experiments</p>', unsafe_allow_html=True)
-    recent = db.get_recent_experiments(limit=8)
-    if recent:
-        import pandas as pd
-        df = pd.DataFrame(recent)
-        display_cols = {
-            "name": "Experiment",
-            "category": "Category",
-            "status": "Status",
-            "version_count": "Versions",
-            "avg_score": "Avg Score",
-            "updated_at": "Last Updated",
-        }
-        available = [c for c in display_cols.keys() if c in df.columns]
-        st.dataframe(
-            df[available].rename(columns={k: v for k, v in display_cols.items() if k in available}),
-            use_container_width=True,
-            hide_index=True,
-        )
-
-    # Performance trend
-    if len(all_scores) > 1:
-        st.markdown('<p class="section-label">Score Trend Across Evaluations</p>', unsafe_allow_html=True)
-        import pandas as pd
-        df_scores = pd.DataFrame(all_scores)
-        if "created_at" in df_scores.columns:
-            df_scores = df_scores.sort_values("created_at")
-            fig = go.Figure()
-            fig.add_trace(go.Scatter(
-                x=list(range(len(df_scores))),
-                y=df_scores["overall_score"],
-                mode="lines+markers",
-                line=dict(color="#7c5cfc", width=2),
-                marker=dict(size=6, color="#7c5cfc"),
-                name="Score",
-            ))
-            fig.update_layout(
-                paper_bgcolor="rgba(0,0,0,0)",
-                plot_bgcolor="rgba(0,0,0,0)",
-                font=dict(color="#9ba3b5", family="Inter"),
-                xaxis_title="Evaluation Sequence",
-                yaxis_title="Score",
-                margin=dict(l=40, r=20, t=20, b=40),
-                height=250,
-                yaxis=dict(range=[0, 105], gridcolor="#2a2d3e"),
-                xaxis=dict(gridcolor="#2a2d3e"),
-            )
-            st.plotly_chart(fig, use_container_width=True)
-
-else:
-    # Empty state
-    st.markdown("")
-    st.markdown("""
-    <div style="text-align: center; padding: 3rem 1rem;">
-        <div style="font-size: 3rem; margin-bottom: 1rem;">✦</div>
-        <h3 style="color: var(--text-primary); font-weight: 600;">Welcome to Shabd.Craft</h3>
-        <p style="color: var(--text-secondary); max-width: 500px; margin: 0.5rem auto 1.5rem;">
-            Start by creating your first prompt experiment. Use the Prompt Workshop to craft,
-            test, and refine your prompts with measurable evaluation.
-        </p>
-    </div>
-    """, unsafe_allow_html=True)
-
-    c1, c2, c3 = st.columns([1, 2, 1])
-    with c2:
-        if st.button("✦ Create Your First Experiment", use_container_width=True, type="primary"):
-            st.switch_page("pages/2_Prompt_Workshop.py")
-
-    # Quick-start templates
-    st.markdown("")
-    st.markdown('<p class="section-label">Quick-Start Templates</p>', unsafe_allow_html=True)
-
-    templates = db.get_prompt_templates(builtin_only=True)
-    if templates:
-        cols = st.columns(3)
-        icons = {"summarization": "📝", "extraction": "🔍", "sentiment": "💬",
-                 "question_answering": "❓", "email_generation": "✉️",
-                 "classification": "🏷️", "json_generation": "{ }",
-                 "customer_support": "🤝", "data_analysis": "📊", "general": "📄"}
-        for i, tmpl in enumerate(templates[:6]):
-            with cols[i % 3]:
-                icon = icons.get(tmpl["category"], "📄")
-                st.markdown(f"""
-                <div class="card-surface">
-                    <div style="font-size: 1.5rem; margin-bottom: 0.3rem;">{icon}</div>
-                    <div style="font-weight: 600; color: var(--text-primary); font-size: 0.9rem;">{tmpl['name']}</div>
-                    <div style="color: var(--text-secondary); font-size: 0.78rem; margin-top: 0.2rem;">{tmpl.get('description', '')[:80]}</div>
-                </div>
-                """, unsafe_allow_html=True)
-                if st.button(f"Use Template", key=f"qt_{tmpl['id']}", use_container_width=True):
-                    st.session_state["prompt_system"] = tmpl.get("system_prompt", "")
-                    st.session_state["prompt_user"] = tmpl["user_prompt_template"]
-                    st.session_state["prompt_technique"] = tmpl.get("technique", "zero_shot")
-                    st.session_state["prompt_output_format"] = tmpl.get("output_format", "text")
-                    st.switch_page("pages/2_Prompt_Workshop.py")
+pg.run()
