@@ -494,12 +494,21 @@ with right_col:
                 few_shot_examples=few_shots_export,
             )
             built_sys, built_user = construct_prompt(export_ver, input_data=sample_input)
+            export_hardened = st.checkbox(
+                "Include Production Auto-Repair Harness & Guardrails (Python)",
+                value=bool(use_harness or use_guardrails),
+                help="Wraps the exported Python code with input sanitization, contract validation, and bounded self-repair retries.",
+                key="cb_export_hardened",
+            )
             snippets = generate_production_code(
                 system_prompt=built_sys,
                 user_prompt=built_user,
                 model=model,
                 temperature=temp,
                 max_tokens=max_tok,
+                include_harness=export_hardened,
+                output_format=fmt,
+                required_json_keys=harness_json_keys if use_harness else None,
             )
 
             fmt_choice = st.radio(

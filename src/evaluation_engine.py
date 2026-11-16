@@ -238,11 +238,12 @@ def evaluate_batch(
 
 
 def aggregate_results(results: list[EvaluationResult]) -> dict:
-    """Aggregate evaluation results into summary statistics."""
+    """Aggregate evaluation results into summary statistics and quantile telemetry."""
     if not results:
         return {
             "total": 0, "success": 0, "failed": 0,
             "avg_score": 0, "min_score": 0, "max_score": 0,
+            "p50_latency_ms": 0.0, "p95_latency_ms": 0.0, "score_std_dev": 0.0,
             "criterion_averages": {},
         }
 
@@ -251,6 +252,21 @@ def aggregate_results(results: list[EvaluationResult]) -> dict:
 
     scores = [r.overall_score for r in successful]
     avg_score = round(sum(scores) / len(scores), 1) if scores else 0.0
+
+    import math
+    std_dev = 0.0
+    if len(scores) > 1:
+        variance = sum((s - avg_score) ** 2 for s in scores) / len(scores)
+        std_dev = round(math.sqrt(variance), 1)
+
+    latencies = sorted(r.latency_ms for r in successful if r.latency_ms > 0)
+    p50_lat = 0.0
+    p95_lat = 0.0
+    if latencies:
+        p50_idx = int(len(latencies) * 0.50)
+        p95_idx = min(len(latencies) - 1, int(len(latencies) * 0.95))
+        p50_lat = round(latencies[p50_idx], 1)
+        p95_lat = round(latencies[p95_idx], 1)
 
     # Criterion averages
     criterion_totals: dict[str, list[float]] = {}
@@ -267,6 +283,9 @@ def aggregate_results(results: list[EvaluationResult]) -> dict:
         "success": len(successful),
         "failed": len(failed),
         "avg_score": avg_score,
+        "score_std_dev": std_dev,
+        "p50_latency_ms": p50_lat,
+        "p95_latency_ms": p95_lat,
         "min_score": round(min(scores), 1) if scores else 0.0,
         "max_score": round(max(scores), 1) if scores else 0.0,
         "criterion_averages": criterion_averages,

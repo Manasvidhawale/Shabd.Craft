@@ -203,32 +203,119 @@ def generate_production_code(
     model: str = "gpt-3.5-turbo",
     temperature: float = 0.7,
     max_tokens: int = 1024,
+    include_harness: bool = False,
+    output_format: str = "text",
+    required_json_keys: list[str] | None = None,
 ) -> dict[str, str]:
     """
     Generate ready-to-run code snippets (OpenAI SDK, LangChain, cURL)
-    for a crafted prompt.
+    for a crafted prompt, with optional production Auto-Repair Harness wrapper.
     """
     resolved_model = "gpt-3.5-turbo" if model == "demo-simulator" else (model or "gpt-3.5-turbo")
     sys_lit = json.dumps(system_prompt or "You are a helpful assistant.")
     usr_lit = json.dumps(user_prompt or "")
 
-    openai_python = (
-        "import os\n"
-        "from openai import OpenAI\n\n"
-        "client = OpenAI(api_key=os.environ.get(\"OPENAI_API_KEY\"))\n\n"
-        f"system_prompt = {sys_lit}\n"
-        f"user_prompt = {usr_lit}\n\n"
-        "response = client.chat.completions.create(\n"
-        f"    model={json.dumps(resolved_model)},\n"
-        f"    temperature={temperature},\n"
-        f"    max_tokens={max_tokens},\n"
-        "    messages=[\n"
-        "        {\"role\": \"system\", \"content\": system_prompt},\n"
-        "        {\"role\": \"user\", \"content\": user_prompt},\n"
-        "    ],\n"
-        ")\n\n"
-        "print(response.choices[0].message.content)\n"
-    )
+    if include_harness:
+        keys_check = ""
+        if output_format == "json" and required_json_keys:
+            keys_lit = json.dumps(required_json_keys)
+            keys_check = f"""
+        parsed = json.loads(text)
+        if isinstance(parsed, dict):
+            missing = [k for k in {keys_lit} if k not in parsed]
+            if missing:
+                violations.append(f"Missing required JSON keys: {{', '.join(missing)}}")
+        else:
+            violations.append("Output is not a valid JSON dictionary")
+"""
+        elif output_format == "json":
+            keys_check = """
+        json.loads(text)
+"""
+
+        openai_python = f"""import json
+import os
+import re
+import time
+from openai import OpenAI
+
+client = OpenAI(api_key=os.environ.get("OPENAI_API_KEY"))
+
+MODEL = {json.dumps(resolved_model)}
+SYSTEM_PROMPT = {sys_lit}
+USER_TEMPLATE = {usr_lit}
+
+def sanitize_untrusted_input(text: str) -> str:
+    \"\"\"Pre-execution guardrail: strip boundary tags and mask credentials.\"\"\"
+    cleaned = re.sub(r"</\\s*(user_input|context|system)\\s*>", "[tag_removed]", text, flags=re.IGNORECASE)
+    cleaned = re.sub(r"\\bsk-(?:proj-)?[A-Za-z0-9_-]{{16,}}\\b", "[SECRET_REDACTED]", cleaned)
+    return cleaned
+
+def validate_contract(text: str) -> list[str]:
+    \"\"\"Deterministic output validation.\"\"\"
+    violations = []
+    try:{keys_check if keys_check else ' pass'}
+    except json.JSONDecodeError as e:
+        violations.append(f"Invalid JSON: {{e.msg}}")
+    return violations
+
+def execute_with_harness(input_data: str, max_retries: int = 2) -> dict:
+    \"\"\"Execute prompt with pre-guardrails, contract enforcement, and self-repair retries.\"\"\"
+    sanitized = sanitize_untrusted_input(input_data)
+    prompt = USER_TEMPLATE.replace("{{{{input}}}}", sanitized)
+
+    current_prompt = prompt
+    for attempt in range(max_retries + 1):
+        response = client.chat.completions.create(
+            model=MODEL,
+            temperature={temperature},
+            max_tokens={max_tokens},
+            messages=[
+                {{"role": "system", "content": SYSTEM_PROMPT}},
+                {{"role": "user", "content": current_prompt}},
+            ],
+        )
+        content = response.choices[0].message.content or ""
+        violations = validate_contract(content)
+
+        if not violations:
+            return {{"content": content, "attempts": attempt + 1, "passed_contract": True}}
+
+        if attempt < max_retries:
+            err_feedback = "\\n".join(f"- {{v}}" for v in violations)
+            current_prompt = (
+                f"{{prompt}}\\n\\n"
+                f"Previous response:\\n{{content}}\\n\\n"
+                f"Violations detected:\\n{{err_feedback}}\\n"
+                "Return a corrected response strictly satisfying all requirements."
+            )
+            time.sleep(0.5)
+
+    return {{"content": content, "attempts": max_retries + 1, "passed_contract": False, "violations": violations}}
+
+if __name__ == "__main__":
+    result = execute_with_harness("Sample test data")
+    print(f"Passed Contract: {{result['passed_contract']}} (Attempts: {{result['attempts']}})")
+    print("Response:\\n", result["content"])
+"""
+    else:
+        openai_python = (
+            "import os\n"
+            "from openai import OpenAI\n\n"
+            "client = OpenAI(api_key=os.environ.get(\"OPENAI_API_KEY\"))\n\n"
+            f"system_prompt = {sys_lit}\n"
+            f"user_prompt = {usr_lit}\n\n"
+            "response = client.chat.completions.create(\n"
+            f"    model={json.dumps(resolved_model)},\n"
+            f"    temperature={temperature},\n"
+            f"    max_tokens={max_tokens},\n"
+            "    messages=[\n"
+            "        {\"role\": \"system\", \"content\": system_prompt},\n"
+            "        {\"role\": \"user\", \"content\": user_prompt},\n"
+            "    ],\n"
+            ")\n\n"
+            "print(response.choices[0].message.content)\n"
+        )
 
     langchain_python = (
         "from langchain_openai import ChatOpenAI\n"

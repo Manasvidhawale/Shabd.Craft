@@ -34,3 +34,9 @@ def test_prompt_library_renders_without_errors():
     at = AppTest.from_file(str(_ROOT / "views" / "6_Prompt_Library.py"), default_timeout=15)
     at.run()
     assert not at.exception
+
+
+def test_prompt_optimizer_renders_without_errors():
+    at = AppTest.from_file(str(_ROOT / "views" / "3_Prompt_Optimizer.py"), default_timeout=15)
+    at.run()
+    assert not at.exception

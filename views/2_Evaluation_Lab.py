@@ -258,9 +258,9 @@ with tab_results:
 
         # Summary metrics
         rm1, rm2, rm3, rm4 = st.columns(4)
-        rm1.metric("Avg Score", f"{agg['avg_score']:.1f}")
+        rm1.metric("Avg Score", f"{agg['avg_score']:.1f}", f"±{agg.get('score_std_dev', 0.0):.1f} σ")
         rm2.metric("Successful", f"{agg['success']}/{agg['total']}")
-        rm3.metric("Failed", agg["failed"])
+        rm3.metric("Latency (p50 / p95)", f"{agg.get('p50_latency_ms', 0):.0f} / {agg.get('p95_latency_ms', 0):.0f}ms")
         rm4.metric("Score Range", f"{agg['min_score']:.0f}–{agg['max_score']:.0f}")
 
         with st.expander("Regression Quality Gate", expanded=False):

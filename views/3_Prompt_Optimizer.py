@@ -24,7 +24,7 @@ from src.schemas import (
     EvaluationMethod, ExecutionStatus, PromptingTechnique, OutputFormat,
     FewShotExample, CriterionScore, OptimizationCandidate, _new_id, _now,
 )
-from src.optimizer import generate_candidates, recommend_best
+from src.optimizer import generate_candidates, recommend_best, run_iterative_optimization
 from src.evaluation_engine import evaluate_batch, aggregate_results
 
 db = get_database()
@@ -87,60 +87,190 @@ else:
 
 st.divider()
 
-# ── Generate Candidates ────────────────────────────────────────────────
-st.markdown("##### Generate Optimization Candidates")
+opt_mode = st.radio(
+    "Optimization Mode",
+    ["Autonomous Multi-Generation Hill-Climbing (Iterative)", "Manual Candidate Generation (1-Shot)"],
+    horizontal=True,
+    key="opt_mode_radio",
+)
 
-num_cands = st.slider("Number of candidates", 1, 3, 3)
+if opt_mode == "Autonomous Multi-Generation Hill-Climbing (Iterative)":
+    st.markdown("##### 🚀 Autonomous Multi-Generation Hill-Climbing (GEPRO)")
+    st.caption("Automatically mutates prompts across generations, benchmarks each generation against test cases, keeps winning mutations, and tracks the generational learning curve.")
 
-if st.button("Generate Candidates", type="primary", use_container_width=True):
-    if not ver_data:
-        st.error("Version not found.")
+    test_cases_raw = db.get_test_cases(sel_exp)
+    if not test_cases_raw:
+        st.warning("⚠️ Autonomous optimization requires test cases to benchmark each generation. Add test cases in the Evaluation Lab first.")
     else:
-        few_shot_ex = [FewShotExample(**e) for e in json.loads(ver_data.get("few_shot_examples", "[]"))]
-        version = PromptVersion(
-            id=ver_data["id"],
-            experiment_id=sel_exp,
-            system_prompt=ver_data["system_prompt"],
-            user_prompt_template=ver_data["user_prompt_template"],
-            technique=PromptingTechnique(ver_data["technique"]),
-            output_format=OutputFormat(ver_data["output_format"]),
-            model_name=ver_data["model_name"],
-            temperature=ver_data["temperature"],
-            max_tokens=ver_data["max_tokens"],
-            few_shot_examples=few_shot_ex,
-        )
+        r_col1, r_col2 = st.columns([2, 1])
+        with r_col1:
+            rounds = st.slider("Optimization Generations / Rounds", 1, 5, settings.max_optimization_rounds, key="auto_opt_rounds")
+        with r_col2:
+            st.markdown("<div style='height:28px;'></div>", unsafe_allow_html=True)
+            start_auto_btn = st.button("Start Autonomous Optimization", type="primary", use_container_width=True, key="btn_start_auto_opt")
 
-        eval_results = []
-        for r in results:
-            if r.get("execution_status") == "success":
-                eval_results.append(EvaluationResult(
-                    test_case_id=r["test_case_id"],
-                    prompt_version_id=r["prompt_version_id"],
-                    experiment_id=r["experiment_id"],
-                    overall_score=r["overall_score"],
-                    execution_status=ExecutionStatus.SUCCESS,
-                    criterion_scores=[CriterionScore(**s) for s in json.loads(r.get("criterion_scores", "[]"))],
-                    weaknesses=json.loads(r.get("weaknesses", "[]")),
-                    suggestions=json.loads(r.get("suggestions", "[]")),
-                ))
-
-        exp_data = db.get_experiment(sel_exp)
-        category = exp_data.get("category", "general") if exp_data else "general"
-
-        with st.spinner("Generating optimization candidates..."):
-            candidates = generate_candidates(
-                original_version=version,
-                evaluation_results=eval_results,
+        if start_auto_btn:
+            active_w = get_active_eval_weights()
+            tc_objs = [TestCase(id=tc["id"], input_data=tc["input_data"], expected_output=tc.get("expected_output", "")) for tc in test_cases_raw]
+            exp_data = db.get_experiment(sel_exp) or {}
+            cat = exp_data.get("category", "general")
+            few_shots = [FewShotExample(**e) for e in json.loads(ver_data.get("few_shot_examples", "[]"))]
+            base_ver_obj = PromptVersion(
+                id=ver_data["id"],
                 experiment_id=sel_exp,
-                num_candidates=num_cands,
-                category=category,
+                version_number=ver_data["version_number"],
+                version_label=ver_data["version_label"],
+                system_prompt=ver_data.get("system_prompt", ""),
+                user_prompt_template=ver_data.get("user_prompt_template", ""),
+                technique=PromptingTechnique(ver_data["technique"]),
+                output_format=OutputFormat(ver_data["output_format"]),
+                model_name=ver_data.get("model_name", settings.default_model),
+                temperature=ver_data.get("temperature", 0.7),
+                max_tokens=ver_data.get("max_tokens", 1024),
+                few_shot_examples=few_shots,
             )
 
-        for c in candidates:
-            db.save_optimization_candidate(c)
+            prog_bar = st.progress(0, text="Initializing generation 0...")
+            def _prog(cur, tot, msg):
+                prog_bar.progress(cur / tot, text=msg)
 
-        st.success(f"Generated {len(candidates)} candidates!")
-        st.rerun()
+            with st.spinner("Running autonomous multi-generation hill-climbing..."):
+                auto_res = run_iterative_optimization(
+                    original_version=base_ver_obj,
+                    test_cases=tc_objs,
+                    experiment_id=sel_exp,
+                    weights=active_w,
+                    max_rounds=rounds,
+                    category=cat,
+                    progress_callback=_prog,
+                )
+                prog_bar.progress(1.0, text="Autonomous optimization complete!")
+                st.session_state["auto_opt_result"] = auto_res
+
+        if st.session_state.get("auto_opt_result"):
+            ares = st.session_state["auto_opt_result"]
+            st.divider()
+            st.markdown("##### 📈 Generational Optimization Progression")
+            init_sc = ares["initial_score"]
+            final_sc = ares["final_score"]
+            delta = round(final_sc - init_sc, 1)
+
+            m_c1, m_c2, m_c3, m_c4 = st.columns(4)
+            m_c1.metric("Baseline Score", f"{init_sc:.1f}")
+            m_c2.metric("Optimized Score", f"{final_sc:.1f}", f"+{delta}" if delta > 0 else f"{delta}")
+            m_c3.metric("Generations Run", f"{ares['rounds_executed']}/{rounds}")
+            m_c4.metric("Status", "Converged ✅" if ares.get("converged") else "Completed 🏁")
+
+            hist = ares.get("history", [])
+            if len(hist) > 1:
+                fig_prog = go.Figure()
+                fig_prog.add_trace(go.Scatter(
+                    x=[f"Gen {h['round']}: {h['strategy']}" for h in hist],
+                    y=[h["score"] for h in hist],
+                    mode="lines+markers+text",
+                    text=[f"{h['score']:.1f}" for h in hist],
+                    textposition="top center",
+                    line=dict(color="#7c5cfc", width=3),
+                    marker=dict(size=9, color="#22d3ee"),
+                ))
+                fig_prog.update_layout(
+                    title="Generational Fitness Progression",
+                    paper_bgcolor="rgba(0,0,0,0)",
+                    plot_bgcolor="rgba(0,0,0,0)",
+                    font=dict(color="#9ba3b5"),
+                    margin=dict(l=40, r=20, t=40, b=40),
+                    yaxis=dict(range=[max(0, min(h['score'] for h in hist) - 10), 105]),
+                    height=280,
+                )
+                st.plotly_chart(fig_prog, use_container_width=True)
+
+            best_v = ares["best_version"]
+            with st.expander("Inspect Best Evolved Prompt", expanded=True):
+                st.markdown(f"**Strategy:** {best_v.optimization_strategy}")
+                if best_v.system_prompt:
+                    st.markdown("**System Prompt:**")
+                    st.code(best_v.system_prompt, language="text")
+                st.markdown("**User Prompt Template:**")
+                st.code(best_v.user_prompt_template, language="text")
+
+                if delta > 0:
+                    if st.button("Save Evolved Version to Library", type="primary", key="btn_save_evolved"):
+                        next_n = db.get_next_version_number(sel_exp)
+                        evolved_ver = PromptVersion(
+                            experiment_id=sel_exp,
+                            version_number=next_n,
+                            version_label=f"v{next_n}: Evolved ({best_v.optimization_strategy})",
+                            system_prompt=best_v.system_prompt,
+                            user_prompt_template=best_v.user_prompt_template,
+                            technique=best_v.technique,
+                            output_format=best_v.output_format,
+                            model_name=best_v.model_name,
+                            temperature=best_v.temperature,
+                            max_tokens=best_v.max_tokens,
+                            few_shot_examples=best_v.few_shot_examples,
+                            is_optimized=True,
+                            optimization_strategy=best_v.optimization_strategy,
+                        )
+                        new_id = db.save_prompt_version(evolved_ver)
+                        st.session_state["current_version_id"] = new_id
+                        st.success(f"Saved optimized version v{next_n} to experiment!")
+                        st.rerun()
+
+else:
+    # ── Manual Single-Turn Candidate Generation ────────────────────────
+    st.markdown("##### Generate Optimization Candidates (1-Shot)")
+
+    num_cands = st.slider("Number of candidates", 1, 3, 3)
+
+    if st.button("Generate Candidates", type="primary", use_container_width=True):
+        if not ver_data:
+            st.error("Version not found.")
+        else:
+            few_shot_ex = [FewShotExample(**e) for e in json.loads(ver_data.get("few_shot_examples", "[]"))]
+            version = PromptVersion(
+                id=ver_data["id"],
+                experiment_id=sel_exp,
+                system_prompt=ver_data["system_prompt"],
+                user_prompt_template=ver_data["user_prompt_template"],
+                technique=PromptingTechnique(ver_data["technique"]),
+                output_format=OutputFormat(ver_data["output_format"]),
+                model_name=ver_data["model_name"],
+                temperature=ver_data["temperature"],
+                max_tokens=ver_data["max_tokens"],
+                few_shot_examples=few_shot_ex,
+            )
+
+            eval_results = []
+            for r in results:
+                if r.get("execution_status") == "success":
+                    eval_results.append(EvaluationResult(
+                        test_case_id=r["test_case_id"],
+                        prompt_version_id=r["prompt_version_id"],
+                        experiment_id=r["experiment_id"],
+                        overall_score=r["overall_score"],
+                        execution_status=ExecutionStatus.SUCCESS,
+                        criterion_scores=[CriterionScore(**s) for s in json.loads(r.get("criterion_scores", "[]"))],
+                        weaknesses=json.loads(r.get("weaknesses", "[]")),
+                        suggestions=json.loads(r.get("suggestions", "[]")),
+                    ))
+
+            exp_data = db.get_experiment(sel_exp)
+            category = exp_data.get("category", "general") if exp_data else "general"
+
+            with st.spinner("Generating optimization candidates..."):
+                candidates = generate_candidates(
+                    original_version=version,
+                    evaluation_results=eval_results,
+                    experiment_id=sel_exp,
+                    num_candidates=num_cands,
+                    category=category,
+                )
+
+            for c in candidates:
+                db.save_optimization_candidate(c)
+
+            st.success(f"Generated {len(candidates)} candidates!")
+            st.rerun()
 
 # ── Display Candidates ─────────────────────────────────────────────────
 existing_candidates = db.get_optimization_candidates(sel_exp)
