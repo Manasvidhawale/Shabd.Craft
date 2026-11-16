@@ -1,46 +1,149 @@
 """
 Shabd.Craft — Evaluation Lab
 
-Test prompts against datasets with rule-based and LLM-as-a-Judge evaluation.
+Test prompts against datasets with rule-based and LLM-as-a-Judge evaluation,
+background threaded execution with Stop/Cancel support, and security auditing.
 """
+
+from __future__ import annotations
 
 import sys
 from pathlib import Path
-sys.path.insert(0, str(Path(__file__).parent.parent))
 
-import streamlit as st
+_ROOT = Path(__file__).parent.parent
+if str(_ROOT) not in sys.path:
+    sys.path.insert(0, str(_ROOT))
+
 import json
+import threading
+from concurrent.futures import ThreadPoolExecutor, as_completed
 import pandas as pd
 import plotly.graph_objects as go
+import streamlit as st
+
 from src.config import settings
+from src.evaluation_engine import (
+    aggregate_results,
+    calculate_weighted_score,
+    evaluate_single,
+)
+from src.export_service import (
+    export_results_csv,
+    export_results_json,
+    parse_test_cases_csv,
+    parse_test_cases_json,
+)
+from src.harness import evaluate_quality_gate
+from src.schemas import (
+    CriterionScore,
+    EvaluationMethod,
+    EvaluationResult,
+    EvaluationWeights,
+    ExecutionStatus,
+    FewShotExample,
+    OutputFormat,
+    PromptVersion,
+    PromptingTechnique,
+    TestCase,
+    _now,
+)
+from src.security_evaluator import (
+    audit_prompt_defenses,
+    harden_prompt_suggestion,
+    run_security_audit,
+)
+from src.test_synthesizer import generate_synthetic_test_cases
 from src.ui_helpers import (
     get_active_eval_weights,
     get_database,
     render_empty_experiment_state,
     render_page_header,
 )
-from src.schemas import (
-    PromptVersion, TestCase, EvaluationWeights, EvaluationResult,
-    EvaluationMethod, PromptingTechnique, OutputFormat, FewShotExample,
-    ExecutionStatus, CriterionScore, _new_id, _now,
-)
-from src.evaluation_engine import evaluate_batch, aggregate_results, calculate_weighted_score
-from src.harness import evaluate_quality_gate
-from src.security_evaluator import (
-    run_security_audit, audit_prompt_defenses, harden_prompt_suggestion,
-)
-from src.test_synthesizer import generate_synthetic_test_cases
-from src.export_service import (
-    export_results_csv, export_results_json, parse_test_cases_csv, parse_test_cases_json,
-)
+from src.ui_theme import status_badge
 
 db = get_database()
 
-render_page_header("Evaluation Lab", "Test prompts against datasets, inspect scores, and audit injection resistance.")
+render_page_header("Evaluation Lab", "Benchmark prompts against test suites, inspect telemetry, and audit security resistance.")
 
-# ── Select Experiment ──────────────────────────────────────────────────
+
+# ── Concurrency Run Handle & Coordinator Thread ─────────────────────────
+class EvalRunHandle:
+    """Thread-safe state handle for background evaluation runs."""
+    def __init__(self, experiment_id: str, version_id: str, total: int):
+        self.experiment_id = experiment_id
+        self.version_id = version_id
+        self.total = total
+        self.completed = 0
+        self.results: list[EvaluationResult] = []
+        self.errors: list[str] = []
+        self.status = "running"  # "running", "stopped", "done"
+        self.lock = threading.Lock()
+        self.stop_event = threading.Event()
+
+
+def _eval_coordinator_thread(
+    handle: EvalRunHandle,
+    version: PromptVersion,
+    test_cases: list[TestCase],
+    weights: EvaluationWeights,
+    method: EvaluationMethod,
+    keywords: list[str] | None,
+    max_words: int | None,
+    judge_model: str | None,
+    max_workers: int = 4,
+):
+    """
+    Background coordinator: owns ThreadPoolExecutor and workers.
+    Strictly isolated: does not call st.* or touch st.session_state.
+    """
+    num_workers = min(max(1, max_workers), len(test_cases))
+
+    def _worker(tc: TestCase) -> EvaluationResult | None:
+        if handle.stop_event.is_set():
+            return None
+        try:
+            return evaluate_single(
+                version=version,
+                test_case=tc,
+                experiment_id=handle.experiment_id,
+                weights=weights,
+                method=method,
+                required_keywords=keywords,
+                max_words=max_words,
+                judge_model=judge_model,
+            )
+        except Exception as e:
+            return EvaluationResult(
+                test_case_id=tc.id,
+                prompt_version_id=version.id,
+                experiment_id=handle.experiment_id,
+                execution_status=ExecutionStatus.FAILED,
+                error_message=str(e),
+                created_at=_now(),
+            )
+
+    with ThreadPoolExecutor(max_workers=num_workers) as executor:
+        futures = {executor.submit(_worker, tc): tc for tc in test_cases}
+        for future in as_completed(futures):
+            if handle.stop_event.is_set():
+                break
+            try:
+                res = future.result()
+                if res is not None:
+                    with handle.lock:
+                        handle.results.append(res)
+                        handle.completed += 1
+            except Exception as e:
+                with handle.lock:
+                    handle.errors.append(str(e))
+                    handle.completed += 1
+
+    with handle.lock:
+        handle.status = "stopped" if handle.stop_event.is_set() else "done"
+
+
+# ── Select Experiment & Version ─────────────────────────────────────────
 experiments = db.list_experiments()
-
 if not experiments:
     render_empty_experiment_state("No prompts saved yet. Create one in the Prompt Workshop first.")
     st.stop()
@@ -52,9 +155,13 @@ if default_exp not in exp_options:
 
 sel_col1, sel_col2 = st.columns(2)
 with sel_col1:
-    selected_exp_id = st.selectbox("Experiment", list(exp_options.keys()),
-                                    format_func=lambda x: exp_options[x],
-                                    index=list(exp_options.keys()).index(default_exp))
+    selected_exp_id = st.selectbox(
+        "Experiment",
+        list(exp_options.keys()),
+        format_func=lambda x: exp_options[x],
+        index=list(exp_options.keys()).index(default_exp),
+        key="eval_exp_selector",
+    )
     st.session_state["current_experiment_id"] = selected_exp_id
 
 versions = db.get_prompt_versions(selected_exp_id)
@@ -67,71 +174,178 @@ default_ver = st.session_state.get("current_version_id", versions[0]["id"])
 if default_ver not in ver_options:
     default_ver = versions[0]["id"]
 with sel_col2:
-    selected_ver_id = st.selectbox("Prompt Version", list(ver_options.keys()),
-                                    format_func=lambda x: ver_options[x],
-                                    index=list(ver_options.keys()).index(default_ver))
+    selected_ver_id = st.selectbox(
+        "Prompt Version",
+        list(ver_options.keys()),
+        format_func=lambda x: ver_options[x],
+        index=list(ver_options.keys()).index(default_ver),
+        key="eval_ver_selector",
+    )
     st.session_state["current_version_id"] = selected_ver_id
 
 st.markdown("")
 
+# ── Background Run Monitor Fragment ─────────────────────────────────────
+@st.fragment(run_every=1)
+def render_live_eval_monitor():
+    handle: EvalRunHandle | None = st.session_state.get("eval_run_handle")
+    if not handle:
+        return
+
+    with handle.lock:
+        curr = handle.completed
+        tot = handle.total
+        stat = handle.status
+        res_count = len(handle.results)
+
+    with st.container(border=True):
+        st.markdown(f"##### {status_badge('running' if stat == 'running' else 'complete', 'Evaluation In Progress' if stat == 'running' else 'Run Completed')}")
+        ratio = curr / max(1, tot)
+        st.progress(ratio, text=f"Evaluating test suite: {curr} / {tot} cases processed ({ratio:.0%})")
+
+        m1, m2 = st.columns([3, 1])
+        with m1:
+            st.caption(f"Status: **{stat.upper()}** · Completed: **{curr}** · Collected Results: **{res_count}**")
+        with m2:
+            if stat == "running":
+                if st.button("⏹ Stop Evaluation", type="primary", use_container_width=True, key="btn_stop_eval"):
+                    handle.stop_event.set()
+                    st.toast("Stop signal sent. Waiting for in-flight requests...", icon=":material/stop_circle:")
+
+        if stat in ("done", "stopped"):
+            # Main thread persists bulk results and clears handle safely
+            db.save_evaluation_results_bulk(handle.results)
+            db.update_experiment_status(handle.experiment_id, ExecutionStatus.SUCCESS.value)
+            st.session_state.pop("eval_run_handle", None)
+            st.toast(f"Evaluation {stat}: {res_count} results saved to database.", icon=":material/check_circle:")
+            st.rerun()
+
+
+render_live_eval_monitor()
+
 # ── Tabs ───────────────────────────────────────────────────────────────
-tab_data, tab_config, tab_results, tab_security = st.tabs(["Test Cases", "Evaluation Config", "Results", "Security Audit"])
+tab_data, tab_config, tab_results, tab_security = st.tabs([
+    "Test Cases",
+    "Evaluation Config",
+    "Results & Telemetry",
+    "Security Audit",
+])
 
 # ── Tab 1: Test Cases ──────────────────────────────────────────────────
 with tab_data:
     test_cases = db.get_test_cases(selected_exp_id)
+    st.markdown("##### Manage Test Suite")
 
-    st.markdown("##### Manage Test Cases")
+    with st.container(border=True):
+        imp1, imp2, imp3 = st.columns([2, 1, 1])
+        with imp1:
+            uploaded = st.file_uploader(
+                "Import Test Cases (CSV or JSON)",
+                type=["csv", "json"],
+                key="tc_file_upload",
+            )
+        with imp2:
+            sample_path = _ROOT / "data" / "sample_test_cases.json"
+            if sample_path.exists():
+                with open(sample_path, "r", encoding="utf-8") as f:
+                    sample_data = f.read()
+                st.download_button(
+                    ":material/download: Sample Dataset",
+                    sample_data,
+                    file_name="sample_test_cases.json",
+                    mime="application/json",
+                    use_container_width=True,
+                )
+        with imp3:
+            if test_cases:
+                csv_export = export_results_csv([], test_cases)
+                st.download_button(
+                    ":material/download: Export Dataset",
+                    csv_export,
+                    file_name="test_cases.csv",
+                    mime="text/csv",
+                    use_container_width=True,
+                )
 
-    # Import controls
-    imp1, imp2, imp3 = st.columns([2, 1, 1])
-    with imp1:
-        uploaded = st.file_uploader("Import test cases (CSV or JSON)", type=["csv", "json"],
-                                     key="tc_upload")
-    with imp2:
-        # Download sample
-        sample_path = Path(__file__).parent.parent / "data" / "sample_test_cases.json"
-        if sample_path.exists():
-            with open(sample_path, "r") as f:
-                sample_data = f.read()
-            st.download_button("Sample Dataset", sample_data,
-                             file_name="sample_test_cases.json", mime="application/json")
-    with imp3:
-        if test_cases:
-            csv_export = export_results_csv([], test_cases)
-            st.download_button("Export Test Cases", csv_export,
-                             file_name="test_cases.csv", mime="text/csv")
+        if uploaded:
+            content = uploaded.read().decode("utf-8")
+            if uploaded.name.endswith(".csv"):
+                parsed, errors = parse_test_cases_csv(content)
+            else:
+                parsed, errors = parse_test_cases_json(content)
 
-    if uploaded:
-        content = uploaded.read().decode("utf-8")
-        if uploaded.name.endswith(".csv"):
-            parsed, errors = parse_test_cases_csv(content)
-        else:
-            parsed, errors = parse_test_cases_json(content)
+            if errors:
+                for err in errors[:5]:
+                    st.error(f":material/error: {err}")
+            if parsed:
+                count = min(len(parsed), settings.max_test_cases)
+                for tc_data in parsed[:count]:
+                    tc = TestCase(
+                        input_data=tc_data["input_data"],
+                        expected_output=tc_data.get("expected_output", ""),
+                    )
+                    db.save_test_case(tc, selected_exp_id)
+                st.toast(f"Imported {count} test cases.", icon=":material/check_circle:")
+                st.rerun()
 
-        if errors:
-            for err in errors[:5]:
-                st.error(err)
-        if parsed:
-            count = min(len(parsed), settings.max_test_cases)
-            for tc_data in parsed[:count]:
-                tc = TestCase(input_data=tc_data["input_data"],
-                             expected_output=tc_data.get("expected_output", ""))
-                db.save_test_case(tc, selected_exp_id)
-            st.success(f"Imported {count} test cases.")
-            st.rerun()
+    # Inline Dataset Editor
+    st.markdown("##### Inline Dataset Table")
+    tc_data_list = [
+        {"#": i + 1, "id": tc["id"], "input_data": tc["input_data"], "expected_output": tc.get("expected_output", "")}
+        for i, tc in enumerate(test_cases)
+    ]
+    df_tc = pd.DataFrame(tc_data_list)
 
-    st.markdown("")
+    if not df_tc.empty:
+        edited_df = st.data_editor(
+            df_tc,
+            column_config={
+                "#": st.column_config.NumberColumn("#", disabled=True, width="small"),
+                "id": None,  # Hide internal ID
+                "input_data": st.column_config.TextColumn("Input Data (Prompt Input)", required=True, width="large"),
+                "expected_output": st.column_config.TextColumn("Expected Output (Ground Truth)", width="medium"),
+            },
+            num_rows="dynamic",
+            use_container_width=True,
+            hide_index=True,
+            key="tc_data_editor",
+        )
+        col_ed1, col_ed2 = st.columns([1, 4])
+        with col_ed1:
+            if st.button(":material/save: Apply Table Edits", key="btn_apply_tc_edits"):
+                # Re-sync modified rows
+                current_ids = set()
+                for _, row in edited_df.iterrows():
+                    inp = str(row.get("input_data", "")).strip()
+                    exp = str(row.get("expected_output", "")).strip()
+                    row_id = row.get("id")
+                    if inp:
+                        if pd.notna(row_id) and row_id:
+                            db.update_test_case(str(row_id), inp, exp)
+                            current_ids.add(str(row_id))
+                        else:
+                            new_tc = TestCase(input_data=inp, expected_output=exp)
+                            nid = db.save_test_case(new_tc, selected_exp_id)
+                            current_ids.add(nid)
+
+                # Delete removed rows
+                for tc in test_cases:
+                    if tc["id"] not in current_ids:
+                        db.delete_test_case(tc["id"])
+                st.toast("Test dataset updated successfully.", icon=":material/check_circle:")
+                st.rerun()
+    else:
+        st.info(":material/info: No test cases found. Add some below or synthesize with AI.")
 
     # AI Test Synthesizer
     with st.expander("AI Synthetic Test Suite Generator", expanded=(not bool(test_cases))):
-        st.caption("Automatically synthesizes diverse test cases (happy path, edge case, and adversarial stress) tailored to your prompt.")
+        st.caption("Synthesize diverse test cases (happy path, edge case, and stress) tailored to your prompt.")
         sc1, sc2 = st.columns([2, 1])
         with sc1:
-            synth_count = st.slider("Test cases to synthesize", 1, 5, 3, key="synth_count_slider")
+            synth_count = st.slider("Test Cases to Synthesize", 1, 5, 3, key="synth_count_slider")
         with sc2:
             st.markdown("<div style='height:28px;'></div>", unsafe_allow_html=True)
-            run_synth = st.button("Synthesize Test Suite", type="primary", use_container_width=True, key="btn_synth_cases")
+            run_synth = st.button(":material/auto_awesome: Synthesize Test Suite", type="primary", use_container_width=True, key="btn_synth_cases")
 
         if run_synth:
             ver_raw = db.get_prompt_version(selected_ver_id)
@@ -154,96 +368,87 @@ with tab_data:
                     )
                 for tc in new_cases:
                     db.save_test_case(tc, selected_exp_id)
-                st.success(f"Generated and saved {len(new_cases)} synthetic test cases.")
+                st.toast(f"Synthesized {len(new_cases)} test cases.", icon=":material/auto_awesome:")
                 st.rerun()
 
-    # Add manually
+    # Manual Single Test Case Add
     with st.expander("Add Test Case Manually"):
         with st.form("add_tc_form", clear_on_submit=True):
             tc_input = st.text_area("Input Data", height=80, placeholder="Enter test input...")
-            tc_expected = st.text_area("Expected Output (optional)", height=60)
-            if st.form_submit_button("Add Test Case"):
+            tc_expected = st.text_area("Expected Output (Optional)", height=60)
+            if st.form_submit_button(":material/add: Add Test Case"):
                 if tc_input.strip():
-                    if len(test_cases) >= settings.max_test_cases:
-                        st.error(f"Maximum {settings.max_test_cases} test cases allowed.")
-                    else:
-                        tc = TestCase(input_data=tc_input.strip(), expected_output=tc_expected.strip())
-                        db.save_test_case(tc, selected_exp_id)
-                        st.success("Test case added.")
-                        st.rerun()
+                    tc = TestCase(input_data=tc_input.strip(), expected_output=tc_expected.strip())
+                    db.save_test_case(tc, selected_exp_id)
+                    st.toast("Test case added.", icon=":material/check_circle:")
+                    st.rerun()
                 else:
                     st.error("Input data is required.")
 
-    # Display current test cases
-    test_cases = db.get_test_cases(selected_exp_id)  # refresh
-    if test_cases:
-        st.markdown(f"**{len(test_cases)} test cases loaded**")
-        for i, tc in enumerate(test_cases):
-            with st.expander(f"TC-{i+1}: {tc['input_data'][:60]}…" if len(tc['input_data']) > 60 else f"TC-{i+1}: {tc['input_data']}"):
-                st.text_area("Input", tc["input_data"], height=60, disabled=True, key=f"tc_v_in_{i}")
-                if tc.get("expected_output"):
-                    st.text_area("Expected", tc["expected_output"], height=60, disabled=True, key=f"tc_v_exp_{i}")
-                if st.button("Delete", key=f"del_tc_{tc['id']}"):
-                    db.delete_test_case(tc["id"])
-                    st.rerun()
-    else:
-        st.info("No test cases yet. Add some manually or import from a file.")
-
 # ── Tab 2: Evaluation Config ──────────────────────────────────────────
 with tab_config:
-    st.markdown("##### Evaluation Settings")
+    st.markdown("##### Evaluation Method & Arbiter Judge")
+    with st.container(border=True):
+        method = st.radio(
+            "Evaluation Method",
+            ["rule_based", "llm_judge", "combined"],
+            format_func=lambda x: {
+                "rule_based": "Rule-Based (Deterministic keyword, length, regex)",
+                "llm_judge": "LLM-as-a-Judge (Qualitative semantic evaluation)",
+                "combined": "Combined (Hybrid normalized average)",
+            }[x],
+            index=0,
+            horizontal=True,
+            key="eval_method_radio",
+        )
 
-    method = st.radio("Evaluation Method", ["rule_based", "llm_judge", "combined"],
-                     format_func=lambda x: {"rule_based": "Rule-Based (deterministic)",
-                                           "llm_judge": "LLM-as-a-Judge",
-                                           "combined": "Combined (averaged)"}[x],
-                     index=0, horizontal=True)
+        judge_model = None
+        if method in ("llm_judge", "combined"):
+            st.caption("Decoupled Arbiter: Evaluates candidate outputs independently.")
+            judge_options = settings.AVAILABLE_MODELS
+            default_judge = "llama-3.3-70b-versatile" if settings.is_groq and "llama-3.3-70b-versatile" in judge_options else judge_options[0]
+            judge_idx = judge_options.index(default_judge) if default_judge in judge_options else 0
+            judge_model = st.selectbox("Arbiter / Judge Model", judge_options, index=judge_idx, key="sel_judge_model")
 
-    judge_model = None
-    if method in ("llm_judge", "combined"):
-        st.caption("🛡️ **Decoupled Evaluator:** In production LLMOps, the Judge should be an independent, high-capacity model (never the candidate model evaluating itself).")
-        judge_options = settings.AVAILABLE_MODELS
-        default_judge = "llama-3.3-70b-versatile" if settings.is_groq and "llama-3.3-70b-versatile" in judge_options else ("gpt-4o" if "gpt-4o" in judge_options else judge_options[0])
-        judge_idx = judge_options.index(default_judge) if default_judge in judge_options else 0
-        judge_model = st.selectbox("Arbiter / Judge Model", judge_options, index=judge_idx, key="sel_judge_model")
-
-    st.markdown("##### Evaluation Weights")
-    st.caption("Configure the relative importance of each criterion. Weights are normalized automatically.")
-
+    st.markdown("")
+    st.markdown("##### Evaluation Criteria Weights")
     active_w = get_active_eval_weights()
-    w1, w2, w3, w4, w5 = st.columns(5)
-    with w1:
-        w_acc = st.slider("Accuracy", 0.0, 1.0, float(active_w.accuracy), 0.05, key="w_acc")
-    with w2:
-        w_rel = st.slider("Relevance", 0.0, 1.0, float(active_w.relevance), 0.05, key="w_rel")
-    with w3:
-        w_ins = st.slider("Instruction Adherence", 0.0, 1.0, float(active_w.instruction_adherence), 0.05, key="w_ins")
-    with w4:
-        w_cla = st.slider("Clarity", 0.0, 1.0, float(active_w.clarity), 0.05, key="w_cla")
-    with w5:
-        w_fmt = st.slider("Format Compliance", 0.0, 1.0, float(active_w.format_compliance), 0.05, key="w_fmt")
+    with st.container(border=True):
+        with st.form("tab_weights_form"):
+            w1, w2, w3, w4, w5 = st.columns(5)
+            with w1:
+                w_acc = st.slider("Accuracy", 0.0, 1.0, float(active_w.accuracy), 0.05, key="lab_w_acc")
+            with w2:
+                w_rel = st.slider("Relevance", 0.0, 1.0, float(active_w.relevance), 0.05, key="lab_w_rel")
+            with w3:
+                w_ins = st.slider("Adherence", 0.0, 1.0, float(active_w.instruction_adherence), 0.05, key="lab_w_ins")
+            with w4:
+                w_cla = st.slider("Clarity", 0.0, 1.0, float(active_w.clarity), 0.05, key="lab_w_cla")
+            with w5:
+                w_fmt = st.slider("Format", 0.0, 1.0, float(active_w.format_compliance), 0.05, key="lab_w_fmt")
+            st.form_submit_button(":material/check: Update Criteria Weights")
 
-    total_w = w_acc + w_rel + w_ins + w_cla + w_fmt
-    if total_w == 0:
-        st.error("At least one weight must be greater than zero.")
+        total_w = w_acc + w_rel + w_ins + w_cla + w_fmt
+        if total_w == 0:
+            st.error("At least one weight must be greater than zero.")
 
     st.markdown("")
     st.markdown("##### Optional Constraints")
-    oc1, oc2 = st.columns(2)
-    with oc1:
-        keywords_str = st.text_input("Required Keywords (comma-separated)", placeholder="JSON, summary, analysis")
-        keywords = [k.strip() for k in keywords_str.split(",") if k.strip()] if keywords_str else None
-    with oc2:
-        max_words = st.number_input("Max Word Count (0 = no limit)", 0, 5000, 0)
-        max_words = max_words if max_words > 0 else None
+    with st.container(border=True):
+        oc1, oc2 = st.columns(2)
+        with oc1:
+            keywords_str = st.text_input("Required Keywords (comma-separated)", placeholder="JSON, summary, analysis", key="tc_kw_filter")
+            keywords = [k.strip() for k in keywords_str.split(",") if k.strip()] if keywords_str else None
+        with oc2:
+            max_words = st.number_input("Max Word Count (0 = no limit)", 0, 5000, 0, key="tc_max_words")
+            max_words = max_words if max_words > 0 else None
 
-# ── Tab 3: Results ─────────────────────────────────────────────────────
+# ── Tab 3: Results & Telemetry ─────────────────────────────────────────
 with tab_results:
     existing_results = db.get_evaluation_results(selected_exp_id, selected_ver_id)
 
     if existing_results:
-        st.markdown("##### Evaluation Results")
-
+        st.markdown("##### Summary Scorecard")
         agg = aggregate_results([
             EvaluationResult(
                 test_case_id=r["test_case_id"],
@@ -256,13 +461,22 @@ with tab_results:
             ) for r in existing_results
         ])
 
-        # Summary metrics
+        # Summary Metric Tiles inside border=True containers
         rm1, rm2, rm3, rm4 = st.columns(4)
-        rm1.metric("Avg Score", f"{agg['avg_score']:.1f}", f"±{agg.get('score_std_dev', 0.0):.1f} σ")
-        rm2.metric("Successful", f"{agg['success']}/{agg['total']}")
-        rm3.metric("Latency (p50 / p95)", f"{agg.get('p50_latency_ms', 0):.0f} / {agg.get('p95_latency_ms', 0):.0f}ms")
-        rm4.metric("Score Range", f"{agg['min_score']:.0f}–{agg['max_score']:.0f}")
+        with rm1:
+            with st.container(border=True):
+                st.metric("Avg Quality Score", f"{agg['avg_score']:.1f}%", f"±{agg.get('score_std_dev', 0.0):.1f}σ")
+        with rm2:
+            with st.container(border=True):
+                st.metric("Successful Runs", f"{agg['success']}/{agg['total']}")
+        with rm3:
+            with st.container(border=True):
+                st.metric("Latency (p50 / p95)", f"{agg.get('p50_latency_ms', 0):.0f} / {agg.get('p95_latency_ms', 0):.0f}ms")
+        with rm4:
+            with st.container(border=True):
+                st.metric("Score Range", f"{agg['min_score']:.0f}% – {agg['max_score']:.0f}%")
 
+        # Regression Quality Gate
         with st.expander("Regression Quality Gate", expanded=False):
             gc1, gc2, gc3 = st.columns(3)
             with gc1:
@@ -280,10 +494,9 @@ with tab_results:
                 min_format_score=min_fmt_gate,
                 min_security_score=min_sec_gate,
             )
-            if gate["passed"]:
-                st.success(f"Release Gate: {gate['status']} — All thresholds satisfied.")
-            else:
-                st.error(f"Release Gate: {gate['status']} — One or more thresholds failed.")
+            gate_badge = status_badge("pass" if gate["passed"] else "fail", gate["status"])
+            st.markdown(f"**Gate Outcome:** {gate_badge}")
+
             gate_rows = [
                 {
                     "Assertion": c["name"],
@@ -294,28 +507,27 @@ with tab_results:
                 for c in gate["checks"]
             ]
             st.dataframe(pd.DataFrame(gate_rows), use_container_width=True, hide_index=True)
-            if sec_rep is None:
-                st.caption("Run Security Audit tab to include security robustness in the quality gate.")
 
-        # Criterion chart
+        # Criteria Chart
         if agg["criterion_averages"]:
             labels = [k.replace("_", " ").title() for k in agg["criterion_averages"].keys()]
             values = list(agg["criterion_averages"].values())
             fig = go.Figure(data=[go.Bar(
                 x=labels, y=values,
-                marker_color=["#7c5cfc", "#8b6fff", "#9b82ff", "#22d3ee", "#34d399"][:len(labels)],
-                text=[f"{v:.0f}" for v in values], textposition="outside",
+                marker_color=["#9b84ff", "#8b6fff", "#7c5cfc", "#22d3ee", "#34d399"][:len(labels)],
+                text=[f"{v:.0f}%" for v in values], textposition="outside",
             )])
             fig.update_layout(
                 paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)",
-                font=dict(color="#9ba3b5"), yaxis=dict(range=[0, 105], gridcolor="#2a2d3e"),
+                font=dict(color="#9ba3b5", family="Inter"),
+                yaxis=dict(range=[0, 105], gridcolor="#2a2d3e"),
                 xaxis=dict(gridcolor="#2a2d3e"),
-                margin=dict(l=40, r=20, t=10, b=40), height=280,
+                margin=dict(l=40, r=20, t=10, b=40), height=260,
             )
             st.plotly_chart(fig, use_container_width=True)
 
-        # Results table
-        st.markdown("##### Detailed Results")
+        # Detailed Results Table
+        st.markdown("##### Detailed Test Results")
         tc_map = {tc["id"]: tc for tc in db.get_test_cases(selected_exp_id)}
         rows = []
         for r in existing_results:
@@ -324,61 +536,54 @@ with tab_results:
             rows.append({
                 "Input": tc.get("input_data", "")[:80],
                 "Output": r.get("generated_output", "")[:80],
-                "Score": r["overall_score"],
+                "Score": float(r["overall_score"]),
                 "Status": r["execution_status"],
-                "Accuracy": scores.get("accuracy", "—"),
-                "Relevance": scores.get("relevance", "—"),
-                "Adherence": scores.get("instruction_adherence", "—"),
-                "Clarity": scores.get("clarity", "—"),
-                "Format": scores.get("format_compliance", "—"),
+                "Accuracy": scores.get("accuracy", 0.0),
+                "Format": scores.get("format_compliance", 0.0),
             })
 
         df_results = pd.DataFrame(rows)
-        st.dataframe(df_results, use_container_width=True, hide_index=True)
+        st.dataframe(
+            df_results,
+            column_config={
+                "Score": st.column_config.ProgressColumn("Overall Score", min_value=0, max_value=100, format="%.1f%%"),
+                "Accuracy": st.column_config.ProgressColumn("Accuracy", min_value=0, max_value=100, format="%.1f%%"),
+                "Format": st.column_config.ProgressColumn("Format", min_value=0, max_value=100, format="%.1f%%"),
+            },
+            use_container_width=True,
+            hide_index=True,
+        )
 
-        # Export
+        # Export Controls
         exp_data = db.get_experiment(selected_exp_id) or {}
         csv_data = export_results_csv(existing_results, db.get_test_cases(selected_exp_id))
         json_data = export_results_json(exp_data, versions, db.get_test_cases(selected_exp_id), existing_results)
 
         ex1, ex2 = st.columns(2)
         with ex1:
-            st.download_button("Export CSV", csv_data, file_name="evaluation_results.csv", mime="text/csv")
+            st.download_button(":material/download: Export Results CSV", csv_data, file_name="evaluation_results.csv", mime="text/csv", use_container_width=True)
         with ex2:
-            st.download_button("Export JSON", json_data, file_name="evaluation_results.json", mime="application/json")
+            st.download_button(":material/download: Export Results JSON", json_data, file_name="evaluation_results.json", mime="application/json", use_container_width=True)
 
-        # Detail drill-down
-        st.markdown("##### Inspect Individual Results")
+        # Detailed Inspection Drill-down
+        st.markdown("##### Inspect Test Cases")
         for i, r in enumerate(existing_results):
             tc = tc_map.get(r["test_case_id"], {})
-            label = f"TC-{i+1}: Score {r['overall_score']:.1f} — {r['execution_status']}"
-            with st.expander(label):
+            with st.expander(f"TC-{i+1}: Score {r['overall_score']:.1f}% — {r['execution_status']}"):
                 st.markdown("**Input:**")
                 st.code(tc.get("input_data", ""), language="text")
                 if tc.get("expected_output"):
                     st.markdown("**Expected:**")
                     st.code(tc["expected_output"], language="text")
-                st.markdown("**Generated:**")
+                st.markdown("**Generated Output:**")
                 st.code(r.get("generated_output", ""), language="text")
-                scores = json.loads(r.get("criterion_scores", "[]"))
-                for s in scores:
-                    st.markdown(f"- **{s['name'].replace('_',' ').title()}**: {s['score']:.0f} — {s.get('explanation', '')}")
-                if r.get("error_message"):
-                    st.error(f"Error: {r['error_message']}")
-                weak = json.loads(r.get("weaknesses", "[]"))
-                sugg = json.loads(r.get("suggestions", "[]"))
-                if weak:
-                    st.markdown("**Weaknesses:** " + ", ".join(weak))
-                if sugg:
-                    st.markdown("**Suggestions:** " + ", ".join(sugg))
-
     else:
-        st.info("No results yet. Configure settings and run the evaluation below.")
+        st.info(":material/info: No evaluation results found for this version. Run an evaluation below.")
 
 # ── Tab 4: Security Audit ──────────────────────────────────────────────
 with tab_security:
-    st.markdown("##### Prompt Injection & Security Audit")
-    st.caption("Evaluates prompt resistance against direct overrides, system prompt extraction, delimiter escapes, and role hijacking.")
+    st.markdown("##### Prompt Injection & Defense Audit")
+    st.caption("Tests resilience against system prompt leaks, role hijacking, and delimiter escapes.")
 
     sec_ver_data = db.get_prompt_version(selected_ver_id)
     if not sec_ver_data:
@@ -405,49 +610,52 @@ with tab_security:
         sc1, sc2, sc3 = st.columns(3)
         for col, chk in zip((sc1, sc2, sc3), static_posture["checks"]):
             with col:
-                status_text = "PASS" if chk["passed"] else "MISSING"
-                st.metric(chk["name"], status_text)
-                st.caption(chk["detail"])
+                with st.container(border=True):
+                    st.markdown(f"**{chk['name']}**")
+                    st.markdown(status_badge("pass" if chk["passed"] else "fail", "PASS" if chk["passed"] else "MISSING"))
+                    st.caption(chk["detail"])
 
         st.markdown("")
-        if st.button("Run Security Audit", type="primary", key=f"run_sec_{selected_ver_id}"):
-            with st.spinner("Running adversarial prompt injection suite..."):
+        if st.button(":material/shield: Run Security Audit", type="primary", key=f"run_sec_{selected_ver_id}"):
+            with st.status(":material/hourglass_top: Running adversarial security suite...", expanded=True) as status_box:
+                status_box.write("Injecting delimiter breaking probes...")
+                status_box.write("Executing system prompt extraction attempts...")
+                status_box.write("Testing role override vectors...")
                 audit_report = run_security_audit(sec_version)
                 st.session_state[f"sec_audit_{selected_ver_id}"] = audit_report
+                status_box.update(label=":material/check_circle: Security audit complete", state="complete")
 
         audit_report = st.session_state.get(f"sec_audit_{selected_ver_id}")
         if audit_report:
-            am1, am2, am3 = st.columns(3)
-            am1.metric("Robustness Score", f"{audit_report['robustness_score']:.1f}%")
-            am2.metric("Attacks Resisted", f"{audit_report['resisted_count']}/{audit_report['total_count']}")
-            am3.metric("Static Posture", f"{static_posture['static_score']:.0f}%")
+            with st.container(border=True):
+                am1, am2, am3 = st.columns(3)
+                with am1:
+                    st.metric("Robustness Score", f"{audit_report['robustness_score']:.1f}%")
+                with am2:
+                    st.metric("Attacks Resisted", f"{audit_report['resisted_count']}/{audit_report['total_count']}")
+                with am3:
+                    st.metric("Static Defense", f"{static_posture['static_score']:.0f}%")
 
-            sec_rows = []
-            for item in audit_report["results"]:
-                sec_rows.append({
-                    "Category": item["category"],
-                    "Attack": item["attack_name"],
-                    "Result": "RESISTED" if item["resisted"] else "VULNERABLE",
-                    "Reason": item["reason"],
-                })
-            st.dataframe(pd.DataFrame(sec_rows), use_container_width=True, hide_index=True)
-
-            with st.expander("Inspect Attack Payloads & Model Responses"):
-                for item in audit_report["results"]:
-                    badge = "RESISTED" if item["resisted"] else "VULNERABLE"
-                    st.markdown(f"**[{badge}] {item['category']} — {item['attack_name']}**")
-                    st.code(item["payload"], language="text")
-                    st.caption(f"Response preview: {item['response_preview']}")
+                sec_rows = [
+                    {
+                        "Category": item["category"],
+                        "Attack": item["attack_name"],
+                        "Result": "RESISTED" if item["resisted"] else "VULNERABLE",
+                        "Reason": item["reason"],
+                    }
+                    for item in audit_report["results"]
+                ]
+                st.dataframe(pd.DataFrame(sec_rows), use_container_width=True, hide_index=True)
 
         st.divider()
-        with st.expander("Hardening Suggestion (XML Delimiters + Security Boundary)"):
+        with st.expander("Security Hardening Suggestion (XML Enclosure & Anti-Extraction)"):
             hard_sys, hard_user = harden_prompt_suggestion(sec_version)
-            st.markdown("**Suggested System Prompt:**")
+            st.markdown("**Suggested Hardened System Prompt:**")
             st.code(hard_sys, language="text")
-            st.markdown("**Suggested User Prompt Template:**")
+            st.markdown("**Suggested Hardened User Prompt:**")
             st.code(hard_user, language="text")
 
-            if st.button("Save Hardened Copy as New Version", key=f"save_hard_{selected_ver_id}"):
+            if st.button(":material/add_circle: Save Hardened Copy as New Version", key=f"save_hard_{selected_ver_id}"):
                 next_num = db.get_next_version_number(selected_exp_id)
                 hardened_ver = PromptVersion(
                     experiment_id=selected_exp_id,
@@ -466,29 +674,38 @@ with tab_security:
                 )
                 new_ver_id = db.save_prompt_version(hardened_ver)
                 st.session_state["current_version_id"] = new_ver_id
-                st.success(f"Saved hardened version v{next_num}.")
+                st.toast(f"Saved hardened version v{next_num}.", icon=":material/check_circle:")
                 st.rerun()
 
-# ── Run Evaluation ─────────────────────────────────────────────────────
+# ── Action Bar: Dispatch Background Coordinator Thread ────────────────
 st.divider()
 test_cases = db.get_test_cases(selected_exp_id)
+active_handle = st.session_state.get("eval_run_handle")
+is_running = bool(active_handle and getattr(active_handle, "status", "") == "running")
 
 if not test_cases:
-    st.warning("Add test cases before running evaluation.")
+    st.warning("Please add or import test cases before running evaluation.")
 elif total_w == 0:
-    st.warning("Fix evaluation weights before running.")
+    st.warning("Fix evaluation criteria weights before running.")
 else:
-    if st.button("Run Evaluation", type="primary", use_container_width=True):
-        weights = EvaluationWeights(accuracy=w_acc, relevance=w_rel,
-                                    instruction_adherence=w_ins, clarity=w_cla,
-                                    format_compliance=w_fmt)
+    btn_col, _ = st.columns([2, 3])
+    with btn_col:
+        run_btn = st.button(
+            ":material/play_arrow: Run Evaluation",
+            type="primary",
+            use_container_width=True,
+            disabled=is_running,
+            help="Executes evaluation across worker threads in the background",
+            key="btn_dispatch_eval",
+        )
 
+    if run_btn:
         ver_data = db.get_prompt_version(selected_ver_id)
         if not ver_data:
             st.error("Prompt version not found.")
         else:
             few_shot_ex = [FewShotExample(**e) for e in json.loads(ver_data.get("few_shot_examples", "[]"))]
-            version = PromptVersion(
+            version_obj = PromptVersion(
                 id=ver_data["id"],
                 experiment_id=selected_exp_id,
                 version_number=ver_data["version_number"],
@@ -503,33 +720,37 @@ else:
                 few_shot_examples=few_shot_ex,
             )
 
-            tc_objects = [TestCase(id=tc["id"], input_data=tc["input_data"],
-                                  expected_output=tc.get("expected_output", ""))
-                         for tc in test_cases]
+            tc_objects = [
+                TestCase(id=tc["id"], input_data=tc["input_data"], expected_output=tc.get("expected_output", ""))
+                for tc in test_cases
+            ]
 
-            progress_bar = st.progress(0, text="Evaluating...")
-
-            def update_progress(current, total):
-                progress_bar.progress(current / total, text=f"Evaluating {current}/{total}...")
-
-            results = evaluate_batch(
-                version=version,
-                test_cases=tc_objects,
-                experiment_id=selected_exp_id,
-                weights=weights,
-                method=EvaluationMethod(method),
-                required_keywords=keywords,
-                max_words=max_words,
-                judge_model=judge_model,
-                max_workers=4,
-                progress_callback=update_progress,
+            weights_obj = EvaluationWeights(
+                accuracy=w_acc,
+                relevance=w_rel,
+                instruction_adherence=w_ins,
+                clarity=w_cla,
+                format_compliance=w_fmt,
             )
 
-            db.save_evaluation_results_bulk(results)
+            # Spawn coordinator background thread
+            new_handle = EvalRunHandle(selected_exp_id, selected_ver_id, len(tc_objects))
+            st.session_state["eval_run_handle"] = new_handle
 
-            db.update_experiment_status(selected_exp_id, ExecutionStatus.SUCCESS.value)
-            progress_bar.progress(1.0, text="Evaluation complete!")
-
-            agg = aggregate_results(results)
-            st.success(f"Evaluated {agg['total']} test cases. Average score: {agg['avg_score']:.1f}")
+            coord_thread = threading.Thread(
+                target=_eval_coordinator_thread,
+                args=(
+                    new_handle,
+                    version_obj,
+                    tc_objects,
+                    weights_obj,
+                    EvaluationMethod(method),
+                    keywords,
+                    max_words,
+                    judge_model,
+                    4,  # max_workers
+                ),
+                daemon=True,
+            )
+            coord_thread.start()
             st.rerun()
