@@ -14,15 +14,32 @@ from typing import Any
 def inject_custom_fonts() -> None:
     """
     The ONE deliberate CSS injection allowed:
-    Loads Inter (UI) and JetBrains Mono (Code/Prompts) with system fallbacks.
-    Does not manipulate layout or override Streamlit component classes.
+    Loads Inter (UI), JetBrains Mono (Code/Prompts), and Material Symbols Rounded.
+    CRITICAL: Never applies font overrides to [class*='st-emotion'] which corrupts icon ligatures into overlapping words.
     """
     st.markdown("""
         <style>
-        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap');
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&family=Material+Symbols+Rounded:opsz,wght,FILL,GRAD@20..48,100..700,0..1,-50..200&display=swap');
         
-        html, body, [class*="st-emotion"] {
+        html, body, .stApp {
             font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+        }
+
+        /* Explicitly protect Material Symbols so ligatures render as glyphs, never as plain text words */
+        span[data-testid="stIconMaterial"], 
+        .material-symbols-rounded, 
+        [class*="material-symbols"] {
+            font-family: 'Material Symbols Rounded' !important;
+            font-style: normal !important;
+            font-weight: normal !important;
+            display: inline-block !important;
+            line-height: 1 !important;
+            text-transform: none !important;
+            letter-spacing: normal !important;
+            word-wrap: normal !important;
+            white-space: nowrap !important;
+            direction: ltr !important;
+            -webkit-font-smoothing: antialiased !important;
         }
         
         code, pre, .stCodeBlock, textarea[data-baseweb="textarea"] {
@@ -86,7 +103,6 @@ def init_durable_state(domain: str, defaults: dict[str, Any]) -> dict[str, Any]:
     if key not in st.session_state:
         st.session_state[key] = dict(defaults)
     else:
-        # Fill any missing default keys
         for k, v in defaults.items():
             if k not in st.session_state[key]:
                 st.session_state[key][k] = v
@@ -108,8 +124,6 @@ def set_durable_value(domain: str, key: str, value: Any) -> None:
 # ── Programmatic Cache Invalidation Protocol ─────────────────────────────
 def invalidate_prompt_caches() -> None:
     """Clear cached data functions when experiments or versions change."""
-    # Note: Streamlit @st.cache_data functions can be cleared via func.clear()
-    # Called by DB mutating actions
     pass
 
 

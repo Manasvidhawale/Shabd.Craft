@@ -29,18 +29,6 @@ db = get_database()
 
 render_page_header("Workspace Overview", "Create prompts, run evaluations, and review experiment performance.")
 
-def _nav_link(page_path: str, label: str, icon: str) -> None:
-    """Render page_link with graceful fallback for standalone execution."""
-    try:
-        st.page_link(page_path, label=label, icon=icon, use_container_width=True)
-    except Exception:
-        alt_path = Path(page_path).name
-        try:
-            st.page_link(alt_path, label=label, icon=icon, use_container_width=True)
-        except Exception:
-            if st.button(label, use_container_width=True):
-                st.switch_page(page_path)
-
 with st.container(border=True):
     qa1, qa2, qa3, qa4 = st.columns(4)
     with qa1:
@@ -57,11 +45,14 @@ with st.container(border=True):
             clear_workshop_widgets()
             st.switch_page("views/1_Prompt_Workshop.py")
     with qa2:
-        _nav_link("views/6_Prompt_Library.py", "Prompt Library", ":material/menu_book:")
+        if st.button(":material/menu_book: Prompt Library", use_container_width=True):
+            st.switch_page("views/6_Prompt_Library.py")
     with qa3:
-        _nav_link("views/2_Evaluation_Lab.py", "Evaluation Lab", ":material/biotech:")
+        if st.button(":material/biotech: Evaluation Lab", use_container_width=True):
+            st.switch_page("views/2_Evaluation_Lab.py")
     with qa4:
-        _nav_link("views/7_Settings.py", "Settings", ":material/settings:")
+        if st.button(":material/settings: Settings", use_container_width=True):
+            st.switch_page("views/7_Settings.py")
 
 st.markdown("")
 
