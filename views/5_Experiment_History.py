@@ -89,7 +89,7 @@ for exp in filtered:
                 st.switch_page("views/2_Evaluation_Lab.py")
 
         with a2:
-            if len(versions) >= 2:
+            if versions:
                 if st.button("Compare", key=f"cmp_{exp['id']}", use_container_width=True):
                     st.session_state["current_experiment_id"] = exp["id"]
                     st.switch_page("views/4_Compare_Versions.py")

@@ -196,13 +196,14 @@ if existing_candidates:
                                          for tc in test_cases]
                             weights = get_active_eval_weights()
 
+                            cand_method = EvaluationMethod.COMBINED if settings.has_api_key and not settings.demo_mode else EvaluationMethod.RULE_BASED
                             with st.spinner(f"Testing {cand['candidate_label']}..."):
                                 eval_results = evaluate_batch(
                                     version=cand_version,
                                     test_cases=tc_objects,
                                     experiment_id=sel_exp,
                                     weights=weights,
-                                    method=EvaluationMethod.RULE_BASED,
+                                    method=cand_method,
                                 )
 
                             for er in eval_results:

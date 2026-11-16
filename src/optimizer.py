@@ -142,6 +142,10 @@ def _parse_optimizer_response(
     """Parse the optimizer's JSON response into candidates."""
     try:
         content = content.strip()
+        if content.startswith("```"):
+            lines = content.split("\n")
+            content = "\n".join(lines[1:-1] if lines[-1].strip() == "```" else lines[1:])
+            content = content.strip()
         if not content.startswith("{"):
             import re
             json_match = re.search(r'\{[\s\S]*\}', content)

@@ -684,7 +684,30 @@ if new_ver_clicked and editing_exp_id:
         st.rerun()
 
 if eval_clicked:
-    if not st.session_state.get("current_experiment_id"):
-        st.warning("Save the prompt first before opening Evaluation Lab.")
+    if not editing_exp_id:
+        name = st.session_state["ws_exp_name"].strip() or "Untitled Experiment"
+        if not user_prompt.strip():
+            st.error("Please enter a user prompt template first.")
+        else:
+            exp_id, ver_id = create_experiment_with_version(
+                db=db,
+                name=name,
+                category=category,
+                system_prompt=system_prompt,
+                user_prompt=user_prompt,
+                technique=tech,
+                output_format=fmt,
+                model_name=model,
+                temperature=temp,
+                max_tokens=max_tok,
+                few_shot_examples=_collect_few_shots(),
+            )
+            if sample_input.strip():
+                db.save_test_case(TestCase(input_data=sample_input, expected_output=expected), exp_id)
+            st.session_state["current_experiment_id"] = exp_id
+            st.session_state["current_version_id"] = ver_id
+            st.session_state["ws_editing_exp_id"] = exp_id
+            st.session_state["ws_editing_ver_id"] = ver_id
+            st.switch_page("views/2_Evaluation_Lab.py")
     else:
         st.switch_page("views/2_Evaluation_Lab.py")

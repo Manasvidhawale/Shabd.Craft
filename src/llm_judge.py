@@ -118,6 +118,10 @@ def _parse_judge_response(content: str) -> Optional[dict]:
     try:
         # Try to extract JSON from response
         content = content.strip()
+        if content.startswith("```"):
+            lines = content.split("\n")
+            content = "\n".join(lines[1:-1] if lines[-1].strip() == "```" else lines[1:])
+            content = content.strip()
         if not content.startswith("{"):
             # Look for JSON block
             import re
