@@ -30,7 +30,7 @@ class Settings:
         if not self.openai_api_key and self.groq_api_key:
             self.openai_api_key = self.groq_api_key
 
-        self.default_model: str = os.getenv("SHABDCRAFT_DEFAULT_MODEL", "llama-3.3-70b-versatile" if self.openai_api_key.startswith("gsk_") else "gpt-3.5-turbo")
+        self.default_model: str = os.getenv("SHABDCRAFT_DEFAULT_MODEL", "openai/gpt-oss-20b" if self.openai_api_key.startswith("gsk_") else "gpt-3.5-turbo")
         self.demo_mode: bool = os.getenv("SHABDCRAFT_DEMO_MODE", "false").lower() == "true"
         self.db_path: str = os.getenv("SHABDCRAFT_DB_PATH", str(_PROJECT_ROOT / "data" / "shabdcraft.db"))
         self.max_test_cases: int = int(os.getenv("SHABDCRAFT_MAX_TEST_CASES", "50"))
@@ -80,6 +80,9 @@ class Settings:
 
     # Available models
     AVAILABLE_MODELS = [
+        "openai/gpt-oss-20b",
+        "openai/gpt-oss-120b",
+        "qwen/qwen3.8-27b",
         "gpt-3.5-turbo",
         "gpt-4",
         "gpt-4-turbo",
@@ -92,6 +95,9 @@ class Settings:
 
     # Pricing per 1K tokens (approximate, for cost estimation only)
     MODEL_PRICING = {
+        "openai/gpt-oss-20b": {"input": 0.0001, "output": 0.0001},
+        "openai/gpt-oss-120b": {"input": 0.0002, "output": 0.0002},
+        "qwen/qwen3.8-27b": {"input": 0.0001, "output": 0.0001},
         "gpt-3.5-turbo": {"input": 0.0005, "output": 0.0015},
         "gpt-4": {"input": 0.03, "output": 0.06},
         "gpt-4-turbo": {"input": 0.01, "output": 0.03},

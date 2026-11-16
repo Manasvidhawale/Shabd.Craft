@@ -44,15 +44,21 @@ class OpenAIProvider(BaseLLMProvider):
 
         try:
             import openai
+            import httpx
 
             is_groq = bool(self._api_key and self._api_key.startswith("gsk_"))
             base_url = "https://api.groq.com/openai/v1" if is_groq else (settings.openai_base_url or None)
-            client = openai.OpenAI(api_key=self._api_key, base_url=base_url, timeout=settings.timeout)
+            client = openai.OpenAI(
+                api_key=self._api_key,
+                base_url=base_url,
+                timeout=settings.timeout,
+                http_client=httpx.Client(),
+            )
 
             # Auto-map model if running on Groq with an OpenAI model name
             req_model = request.model
             if is_groq and (req_model.startswith("gpt-") or req_model == "demo-simulator" or not req_model):
-                req_model = "llama-3.3-70b-versatile"
+                req_model = "openai/gpt-oss-20b"
 
             messages = []
             if request.system_prompt:
