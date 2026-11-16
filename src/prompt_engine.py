@@ -135,6 +135,17 @@ def construct_prompt(
     # Merge variables with input data
     all_vars = dict(variables or {})
     if input_data:
+        # Check if input_data is a JSON-encoded dictionary of multiple mapped variables
+        if input_data.strip().startswith("{") and input_data.strip().endswith("}"):
+            try:
+                import json
+                parsed_dict = json.loads(input_data)
+                if isinstance(parsed_dict, dict):
+                    for k, v in parsed_dict.items():
+                        all_vars[str(k)] = str(v)
+            except (json.JSONDecodeError, TypeError):
+                pass
+
         # Extract variables from user template
         extracted = extract_variables(user_template)
         # If template has a single variable placeholder, bind input_data to it

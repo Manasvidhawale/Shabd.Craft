@@ -29,6 +29,7 @@ from src.harness import evaluate_quality_gate
 from src.security_evaluator import (
     run_security_audit, audit_prompt_defenses, harden_prompt_suggestion,
 )
+from src.test_synthesizer import generate_synthetic_test_cases
 from src.export_service import (
     export_results_csv, export_results_json, parse_test_cases_csv, parse_test_cases_json,
 )
@@ -121,6 +122,40 @@ with tab_data:
             st.rerun()
 
     st.markdown("")
+
+    # AI Test Synthesizer
+    with st.expander("AI Synthetic Test Suite Generator", expanded=(not bool(test_cases))):
+        st.caption("Automatically synthesizes diverse test cases (happy path, edge case, and adversarial stress) tailored to your prompt.")
+        sc1, sc2 = st.columns([2, 1])
+        with sc1:
+            synth_count = st.slider("Test cases to synthesize", 1, 5, 3, key="synth_count_slider")
+        with sc2:
+            st.markdown("<div style='height:28px;'></div>", unsafe_allow_html=True)
+            run_synth = st.button("Synthesize Test Suite", type="primary", use_container_width=True, key="btn_synth_cases")
+
+        if run_synth:
+            ver_raw = db.get_prompt_version(selected_ver_id)
+            exp_raw = db.get_experiment(selected_exp_id) or {}
+            if not ver_raw:
+                st.error("No active prompt version found.")
+            else:
+                synth_ver = PromptVersion(
+                    id=ver_raw["id"],
+                    experiment_id=selected_exp_id,
+                    system_prompt=ver_raw.get("system_prompt", ""),
+                    user_prompt_template=ver_raw.get("user_prompt_template", ""),
+                    model_name=ver_raw.get("model_name", ""),
+                )
+                with st.spinner("Synthesizing test suite with AI..."):
+                    new_cases = generate_synthetic_test_cases(
+                        synth_ver,
+                        count=synth_count,
+                        category=exp_raw.get("category", "general"),
+                    )
+                for tc in new_cases:
+                    db.save_test_case(tc, selected_exp_id)
+                st.success(f"Generated and saved {len(new_cases)} synthetic test cases.")
+                st.rerun()
 
     # Add manually
     with st.expander("Add Test Case Manually"):

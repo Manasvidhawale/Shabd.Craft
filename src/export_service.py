@@ -77,9 +77,11 @@ def export_experiment_summary_json(summary: dict) -> str:
     return json.dumps(summary, indent=2, default=str)
 
 
-def parse_test_cases_csv(content: str) -> tuple[list[dict], list[str]]:
+def parse_test_cases_csv(content: str, variable_mapping: dict[str, str] | None = None) -> tuple[list[dict], list[str]]:
     """
     Parse test cases from CSV content.
+    Supports standard 'input_data'/'expected_output' columns, custom variable mapping,
+    or multi-column headers packed into structured variable dictionaries.
     Returns (test_cases, errors).
     """
     test_cases = []
@@ -87,19 +89,34 @@ def parse_test_cases_csv(content: str) -> tuple[list[dict], list[str]]:
 
     try:
         reader = csv.DictReader(io.StringIO(content))
-        for i, row in enumerate(reader, 1):
-            if "input_data" not in row and "input" not in row:
-                errors.append(f"Row {i}: Missing 'input_data' or 'input' column.")
-                continue
+        fieldnames = reader.fieldnames or []
+        expected_col = next((f for f in fieldnames if f.lower() in ("expected_output", "expected", "ground_truth", "target")), None)
 
-            input_data = row.get("input_data", "") or row.get("input", "")
+        for i, row in enumerate(reader, 1):
+            expected_val = (row.get(expected_col, "") if expected_col else "").strip()
+
+            if variable_mapping:
+                mapped = {var: str(row.get(col, "")).strip() for var, col in variable_mapping.items() if col in row}
+                input_data = json.dumps(mapped) if len(mapped) > 1 else (next(iter(mapped.values())) if mapped else "")
+            elif "input_data" in row or "input" in row:
+                input_data = (row.get("input_data", "") or row.get("input", "")).strip()
+            else:
+                non_expected = [f for f in fieldnames if f != expected_col]
+                if len(non_expected) == 1:
+                    input_data = str(row.get(non_expected[0], "")).strip()
+                elif len(non_expected) > 1:
+                    input_data = json.dumps({col: str(row.get(col, "")).strip() for col in non_expected})
+                else:
+                    errors.append(f"Row {i}: Missing input data.")
+                    continue
+
             if not input_data.strip():
                 errors.append(f"Row {i}: Empty input data.")
                 continue
 
             test_cases.append({
                 "input_data": input_data.strip(),
-                "expected_output": (row.get("expected_output", "") or row.get("expected", "")).strip(),
+                "expected_output": expected_val,
             })
 
         if not test_cases and not errors:

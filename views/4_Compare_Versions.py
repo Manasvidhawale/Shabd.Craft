@@ -12,6 +12,14 @@ import streamlit as st
 import json
 import pandas as pd
 import plotly.graph_objects as go
+from src.config import settings
+from src.prompt_engine import execute_prompt
+from src.schemas import (
+    FewShotExample,
+    OutputFormat,
+    PromptVersion,
+    PromptingTechnique,
+)
 from src.ui_helpers import (
     get_database,
     render_empty_experiment_state,
@@ -41,6 +49,140 @@ sel_exp = st.selectbox("Experiment", list(exp_opts.keys()),
 st.session_state["current_experiment_id"] = sel_exp
 
 versions = db.get_prompt_versions(sel_exp)
+if not versions:
+    st.info("No prompt versions available for this experiment.")
+    st.stop()
+
+ver_opts = {v["id"]: f"v{v['version_number']}: {v['version_label']}" for v in versions}
+
+compare_mode = st.radio(
+    "Comparison View",
+    ["Prompt Version Diff (A vs B)", "Multi-Model Arena (Model Battle)"],
+    horizontal=True,
+    key="compare_view_mode",
+)
+
+if compare_mode == "Multi-Model Arena (Model Battle)":
+    st.markdown("##### Multi-Model Arena — Head-to-Head Cross-Model Benchmark")
+    st.caption("Benchmark the exact same prompt version across two different LLM architectures side-by-side.")
+
+    c_pv, c_in = st.columns([1, 1])
+    with c_pv:
+        arena_ver_id = st.selectbox(
+            "Prompt Version",
+            list(ver_opts.keys()),
+            format_func=lambda x: ver_opts[x],
+            key="arena_ver_select",
+        )
+    with c_in:
+        test_cases = db.get_test_cases(sel_exp)
+        tc_choices = ["Custom Input"] + [f"TC-{i+1}: {tc['input_data'][:45]}..." for i, tc in enumerate(test_cases)]
+        chosen_input_src = st.selectbox("Benchmark Input Source", tc_choices, key="arena_input_src")
+
+    if chosen_input_src == "Custom Input":
+        arena_input = st.text_area("Input Data for Model Battle", height=80, placeholder="Enter input text to test both models...", key="arena_custom_input")
+    else:
+        tc_idx = tc_choices.index(chosen_input_src) - 1
+        arena_input = test_cases[tc_idx]["input_data"]
+        st.caption(f"Using input from test case TC-{tc_idx+1}")
+
+    m_col1, m_col2 = st.columns(2)
+    with m_col1:
+        model_a = st.selectbox("Model A", settings.AVAILABLE_MODELS, index=0, key="arena_m_a")
+    with m_col2:
+        idx_b = 1 if len(settings.AVAILABLE_MODELS) > 1 else 0
+        model_b = st.selectbox("Model B", settings.AVAILABLE_MODELS, index=idx_b, key="arena_m_b")
+
+    if st.button("Run Model Battle", type="primary", use_container_width=True, key="btn_run_arena"):
+        if not arena_input.strip():
+            st.error("Please provide input data for the model battle.")
+        else:
+            ver_raw = db.get_prompt_version(arena_ver_id)
+            few_shots_list = [FewShotExample(**e) for e in json.loads(ver_raw.get("few_shot_examples", "[]"))]
+
+            ver_a_obj = PromptVersion(
+                id=ver_raw["id"],
+                experiment_id=sel_exp,
+                system_prompt=ver_raw.get("system_prompt", ""),
+                user_prompt_template=ver_raw.get("user_prompt_template", ""),
+                technique=PromptingTechnique(ver_raw["technique"]),
+                output_format=OutputFormat(ver_raw["output_format"]),
+                model_name=model_a,
+                temperature=ver_raw.get("temperature", 0.7),
+                max_tokens=ver_raw.get("max_tokens", 1024),
+                few_shot_examples=few_shots_list,
+            )
+            ver_b_obj = PromptVersion(
+                id=ver_raw["id"],
+                experiment_id=sel_exp,
+                system_prompt=ver_raw.get("system_prompt", ""),
+                user_prompt_template=ver_raw.get("user_prompt_template", ""),
+                technique=PromptingTechnique(ver_raw["technique"]),
+                output_format=OutputFormat(ver_raw["output_format"]),
+                model_name=model_b,
+                temperature=ver_raw.get("temperature", 0.7),
+                max_tokens=ver_raw.get("max_tokens", 1024),
+                few_shot_examples=few_shots_list,
+            )
+
+            with st.spinner(f"Battling {model_a} vs {model_b}..."):
+                resp_a = execute_prompt(ver_a_obj, input_data=arena_input)
+                resp_b = execute_prompt(ver_b_obj, input_data=arena_input)
+
+            st.session_state["arena_last_result"] = {
+                "model_a": model_a,
+                "model_b": model_b,
+                "resp_a": resp_a.model_dump(),
+                "resp_b": resp_b.model_dump(),
+            }
+
+    if st.session_state.get("arena_last_result"):
+        ar = st.session_state["arena_last_result"]
+        ra = ar["resp_a"]
+        rb = ar["resp_b"]
+
+        st.divider()
+        st.markdown("##### Battle Results")
+
+        res_c1, res_c2 = st.columns(2)
+        with res_c1:
+            st.markdown(f"**Model A: `{ar['model_a']}`**")
+            st.text_area("Output A", value=ra.get("content", "") or (f"Error: {ra.get('error')}" if ra.get("error") else ""), height=220, disabled=True, key="arena_out_a")
+            m1, m2, m3 = st.columns(3)
+            m1.metric("Latency", f"{ra.get('latency_ms', 0):.0f}ms")
+            m2.metric("Tokens", ra.get("total_tokens", 0))
+            cost_a = ra.get("cost_estimate", 0)
+            m3.metric("Cost", f"${cost_a:.5f}" if cost_a > 0 else "$0.00")
+
+        with res_c2:
+            st.markdown(f"**Model B: `{ar['model_b']}`**")
+            st.text_area("Output B", value=rb.get("content", "") or (f"Error: {rb.get('error')}" if rb.get("error") else ""), height=220, disabled=True, key="arena_out_b")
+            m4, m5, m6 = st.columns(3)
+            m4.metric("Latency", f"{rb.get('latency_ms', 0):.0f}ms")
+            m5.metric("Tokens", rb.get("total_tokens", 0))
+            cost_b = rb.get("cost_estimate", 0)
+            m6.metric("Cost", f"${cost_b:.5f}" if cost_b > 0 else "$0.00")
+
+        chart_df = pd.DataFrame([
+            {"Metric": "Latency (ms)", ar["model_a"]: ra.get("latency_ms", 0), ar["model_b"]: rb.get("latency_ms", 0)},
+            {"Metric": "Total Tokens", ar["model_a"]: ra.get("total_tokens", 0), ar["model_b"]: rb.get("total_tokens", 0)},
+        ])
+        fig_arena = go.Figure(data=[
+            go.Bar(name=ar["model_a"], x=chart_df["Metric"], y=chart_df[ar["model_a"]], marker_color="#7c5cfc"),
+            go.Bar(name=ar["model_b"], x=chart_df["Metric"], y=chart_df[ar["model_b"]], marker_color="#22d3ee"),
+        ])
+        fig_arena.update_layout(
+            barmode="group",
+            paper_bgcolor="rgba(0,0,0,0)",
+            plot_bgcolor="rgba(0,0,0,0)",
+            font=dict(color="#9ba3b5"),
+            margin=dict(l=40, r=20, t=20, b=40),
+            height=260,
+        )
+        st.plotly_chart(fig_arena, use_container_width=True)
+
+    st.stop()
+
 if len(versions) < 2:
     st.info("This experiment only has 1 prompt version. Save a second version in Prompt Workshop or generate candidates in Prompt Optimizer to compare.")
     cb1, cb2 = st.columns(2)
@@ -53,7 +195,6 @@ if len(versions) < 2:
     st.stop()
 
 # ── Select two versions ───────────────────────────────────────────────
-ver_opts = {v["id"]: f"v{v['version_number']}: {v['version_label']}" for v in versions}
 
 c1, c2 = st.columns(2)
 with c1:
