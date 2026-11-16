@@ -30,7 +30,11 @@ class Settings:
         if not self.openai_api_key and self.groq_api_key:
             self.openai_api_key = self.groq_api_key
 
-        self.default_model: str = os.getenv("SHABDCRAFT_DEFAULT_MODEL", "openai/gpt-oss-20b" if self.openai_api_key.startswith("gsk_") else "gpt-3.5-turbo")
+        raw_def_model = os.getenv("SHABDCRAFT_DEFAULT_MODEL", "").strip()
+        if self.openai_api_key.startswith("gsk_"):
+            self.default_model = "openai/gpt-oss-20b" if (not raw_def_model or raw_def_model.startswith("gpt-")) else raw_def_model
+        else:
+            self.default_model = raw_def_model or "gpt-3.5-turbo"
         self.demo_mode: bool = os.getenv("SHABDCRAFT_DEMO_MODE", "false").lower() == "true"
         self.db_path: str = os.getenv("SHABDCRAFT_DB_PATH", str(_PROJECT_ROOT / "data" / "shabdcraft.db"))
         self.max_test_cases: int = int(os.getenv("SHABDCRAFT_MAX_TEST_CASES", "50"))

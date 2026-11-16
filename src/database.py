@@ -30,9 +30,10 @@ class Database:
 
     @contextmanager
     def _connect(self):
-        conn = sqlite3.connect(self.db_path)
+        conn = sqlite3.connect(self.db_path, timeout=30.0)
         conn.row_factory = sqlite3.Row
         conn.execute("PRAGMA journal_mode=WAL")
+        conn.execute("PRAGMA busy_timeout=30000")
         conn.execute("PRAGMA foreign_keys=ON")
         try:
             yield conn
@@ -343,6 +344,30 @@ class Database:
                  1 if er.is_demo else 0, er.created_at),
             )
         return er.id
+
+    def save_evaluation_results_bulk(self, results: list[EvaluationResult]):
+        """Save multiple evaluation results inside a single transactional commit."""
+        if not results:
+            return
+        with self._connect() as conn:
+            conn.executemany(
+                "INSERT INTO evaluation_results "
+                "(id, test_case_id, prompt_version_id, experiment_id, generated_output, "
+                "criterion_scores, overall_score, weaknesses, suggestions, "
+                "evaluation_method, is_reference_verified, execution_status, "
+                "error_message, latency_ms, tokens_used, cost_estimate, is_demo, created_at) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                [(er.id, er.test_case_id, er.prompt_version_id, er.experiment_id,
+                  er.generated_output,
+                  json.dumps([s.model_dump() for s in er.criterion_scores]),
+                  er.overall_score,
+                  json.dumps(er.weaknesses), json.dumps(er.suggestions),
+                  er.evaluation_method.value,
+                  1 if er.is_reference_verified else 0,
+                  er.execution_status.value, er.error_message,
+                  er.latency_ms, er.tokens_used, er.cost_estimate,
+                  1 if er.is_demo else 0, er.created_at) for er in results],
+            )
 
     def get_evaluation_results(self, experiment_id: str, prompt_version_id: Optional[str] = None) -> list[dict]:
         with self._connect() as conn:

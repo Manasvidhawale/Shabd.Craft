@@ -10,9 +10,30 @@ from __future__ import annotations
 import time
 from typing import Optional
 
+import httpx
 from src.providers.base import BaseLLMProvider
 from src.schemas import LLMRequest, LLMResponse
 from src.config import settings
+
+# Persistent connection pool for HTTP keep-alives and low-latency reuse
+_SHARED_HTTP_CLIENT = httpx.Client(
+    limits=httpx.Limits(max_keepalive_connections=20, max_connections=50),
+    timeout=httpx.Timeout(settings.timeout),
+)
+_CLIENT_CACHE: dict[tuple[str, str | None], any] = {}
+
+
+def _get_openai_client(api_key: str, base_url: str | None):
+    cache_key = (api_key, base_url)
+    if cache_key not in _CLIENT_CACHE:
+        import openai
+        _CLIENT_CACHE[cache_key] = openai.OpenAI(
+            api_key=api_key,
+            base_url=base_url,
+            timeout=settings.timeout,
+            http_client=_SHARED_HTTP_CLIENT,
+        )
+    return _CLIENT_CACHE[cache_key]
 
 
 class OpenAIProvider(BaseLLMProvider):
@@ -44,16 +65,10 @@ class OpenAIProvider(BaseLLMProvider):
 
         try:
             import openai
-            import httpx
 
             is_groq = bool(self._api_key and self._api_key.startswith("gsk_"))
             base_url = "https://api.groq.com/openai/v1" if is_groq else (settings.openai_base_url or None)
-            client = openai.OpenAI(
-                api_key=self._api_key,
-                base_url=base_url,
-                timeout=settings.timeout,
-                http_client=httpx.Client(),
-            )
+            client = _get_openai_client(self._api_key, base_url)
 
             # Auto-map model if running on Groq with an OpenAI model name
             req_model = request.model
@@ -66,12 +81,24 @@ class OpenAIProvider(BaseLLMProvider):
             messages.append({"role": "user", "content": request.user_prompt})
 
             start = time.time()
-            response = client.chat.completions.create(
-                model=req_model,
-                messages=messages,
-                temperature=request.temperature,
-                max_tokens=request.max_tokens,
-            )
+            # Resilient exponential backoff retry for HTTP 429 rate limit
+            max_rate_retries = 3
+            response = None
+            for attempt in range(max_rate_retries + 1):
+                try:
+                    response = client.chat.completions.create(
+                        model=req_model,
+                        messages=messages,
+                        temperature=request.temperature,
+                        max_tokens=request.max_tokens,
+                    )
+                    break
+                except openai.RateLimitError as rle:
+                    if attempt == max_rate_retries:
+                        raise rle
+                    sleep_time = min(6.0, 1.0 * (2 ** attempt)) + 0.1
+                    time.sleep(sleep_time)
+
             latency_ms = (time.time() - start) * 1000
 
             choice = response.choices[0]

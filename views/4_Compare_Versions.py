@@ -10,10 +10,12 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 
 import streamlit as st
 import json
+from concurrent.futures import ThreadPoolExecutor
 import pandas as pd
 import plotly.graph_objects as go
 from src.config import settings
-from src.prompt_engine import execute_prompt
+from src.prompt_engine import execute_prompt, get_provider
+from src.llm_judge import evaluate_pairwise_position_swap
 from src.schemas import (
     FewShotExample,
     OutputFormat,
@@ -125,15 +127,20 @@ if compare_mode == "Multi-Model Arena (Model Battle)":
                 few_shot_examples=few_shots_list,
             )
 
-            with st.spinner(f"Battling {model_a} vs {model_b}..."):
-                resp_a = execute_prompt(ver_a_obj, input_data=arena_input)
-                resp_b = execute_prompt(ver_b_obj, input_data=arena_input)
+            with st.spinner(f"Battling {model_a} vs {model_b} concurrently..."):
+                with ThreadPoolExecutor(max_workers=2) as arena_exec:
+                    fut_a = arena_exec.submit(execute_prompt, ver_a_obj, arena_input)
+                    fut_b = arena_exec.submit(execute_prompt, ver_b_obj, arena_input)
+                    resp_a = fut_a.result()
+                    resp_b = fut_b.result()
 
             st.session_state["arena_last_result"] = {
                 "model_a": model_a,
                 "model_b": model_b,
                 "resp_a": resp_a.model_dump(),
                 "resp_b": resp_b.model_dump(),
+                "instruction": ver_raw.get("user_prompt_template", ""),
+                "arena_input": arena_input,
             }
 
     if st.session_state.get("arena_last_result"):
@@ -180,6 +187,44 @@ if compare_mode == "Multi-Model Arena (Model Battle)":
             height=260,
         )
         st.plotly_chart(fig_arena, use_container_width=True)
+
+        st.markdown("##### ⚖️ Automated AI Referee Verdict (Zheng et al. Position-Debiased)")
+        st.caption("Runs bidirectional position swap `(A, B)` vs `(B, A)` to eliminate first-position preference bias and crowns the true empirical winner.")
+
+        ref_btn = st.button("Crown Winner with AI Referee", type="primary", key="btn_run_referee")
+        if ref_btn:
+            with st.spinner("AI Referee evaluating responses with position-swap debiasing..."):
+                provider = get_provider()
+                # Use a dedicated strong judge if available
+                judge_m = "llama-3.3-70b-versatile" if settings.is_groq and "llama-3.3-70b-versatile" in settings.AVAILABLE_MODELS else ("gpt-4o" if "gpt-4o" in settings.AVAILABLE_MODELS else settings.default_model)
+                ref_res = evaluate_pairwise_position_swap(
+                    provider=provider,
+                    instruction=ar.get("instruction", "Follow instructions precisely."),
+                    input_data=ar.get("arena_input", ""),
+                    candidate_a=ra.get("content", ""),
+                    candidate_b=rb.get("content", ""),
+                    model=judge_m,
+                )
+                st.session_state["arena_referee_result"] = ref_res
+
+        if st.session_state.get("arena_referee_result"):
+            ref = st.session_state["arena_referee_result"]
+            winner = ref["winner"]
+            if winner == "A":
+                st.success(f"🏆 **Winner: Model A (`{ar['model_a']}`)**")
+            elif winner == "B":
+                st.success(f"🏆 **Winner: Model B (`{ar['model_b']}`)**")
+            elif winner == "tie":
+                st.info("🤝 **Result: Statistical Tie** (Both models performed at parity)")
+            else:
+                st.warning("⚠️ **Result: Inconclusive Position Bias** (Model favored whichever candidate was shown first)")
+
+            rf_c1, rf_c2, rf_c3 = st.columns(3)
+            rf_c1.metric(f"Score: {ar['model_a']}", f"{ref.get('score_a', 0):.1f}/100")
+            rf_c2.metric(f"Score: {ar['model_b']}", f"{ref.get('score_b', 0):.1f}/100")
+            rf_c3.metric("Position Bias Detected", "YES ⚠️" if ref.get("position_bias_detected") else "CLEAN ✅")
+
+            st.markdown(f"**Consensus Rationale:** {ref.get('consensus_rationale', '')}")
 
     st.stop()
 

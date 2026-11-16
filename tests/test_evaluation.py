@@ -190,3 +190,36 @@ class TestVerbosityPenaltyAndPairwiseJudge:
         assert "score_a" in res
         assert "score_b" in res
         assert res["position_bias_detected"] is False
+
+    def test_concurrent_batch_evaluation_preserves_order(self):
+        from src.evaluation_engine import evaluate_batch
+        from src.schemas import PromptVersion, TestCase, EvaluationWeights, EvaluationMethod
+
+        version = PromptVersion(
+            experiment_id="e1",
+            user_prompt_template="Echo: {{input}}",
+        )
+        test_cases = [
+            TestCase(id=f"tc_{i}", input_data=f"Input message {i}", expected_output=f"Output {i}")
+            for i in range(8)
+        ]
+        weights = EvaluationWeights(accuracy=1, relevance=1, instruction_adherence=1, clarity=1, format_compliance=1)
+
+        progress_calls = []
+        def _on_prog(cur, tot):
+            progress_calls.append((cur, tot))
+
+        results = evaluate_batch(
+            version=version,
+            test_cases=test_cases,
+            experiment_id="e1",
+            weights=weights,
+            method=EvaluationMethod.RULE_BASED,
+            max_workers=4,
+            progress_callback=_on_prog,
+        )
+
+        assert len(results) == 8
+        for i, res in enumerate(results):
+            assert res.test_case_id == f"tc_{i}"
+        assert len(progress_calls) == 8

@@ -199,8 +199,13 @@ with tab_config:
                                            "combined": "Combined (averaged)"}[x],
                      index=0, horizontal=True)
 
+    judge_model = None
     if method in ("llm_judge", "combined"):
-        st.caption("Note: LLM-as-a-Judge scores may vary between runs and are not objective ground truth.")
+        st.caption("🛡️ **Decoupled Evaluator:** In production LLMOps, the Judge should be an independent, high-capacity model (never the candidate model evaluating itself).")
+        judge_options = settings.AVAILABLE_MODELS
+        default_judge = "llama-3.3-70b-versatile" if settings.is_groq and "llama-3.3-70b-versatile" in judge_options else ("gpt-4o" if "gpt-4o" in judge_options else judge_options[0])
+        judge_idx = judge_options.index(default_judge) if default_judge in judge_options else 0
+        judge_model = st.selectbox("Arbiter / Judge Model", judge_options, index=judge_idx, key="sel_judge_model")
 
     st.markdown("##### Evaluation Weights")
     st.caption("Configure the relative importance of each criterion. Weights are normalized automatically.")
@@ -515,11 +520,12 @@ else:
                 method=EvaluationMethod(method),
                 required_keywords=keywords,
                 max_words=max_words,
+                judge_model=judge_model,
+                max_workers=4,
                 progress_callback=update_progress,
             )
 
-            for r in results:
-                db.save_evaluation_result(r)
+            db.save_evaluation_results_bulk(results)
 
             db.update_experiment_status(selected_exp_id, ExecutionStatus.SUCCESS.value)
             progress_bar.progress(1.0, text="Evaluation complete!")
