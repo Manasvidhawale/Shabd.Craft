@@ -103,13 +103,13 @@ if metrics["total_experiments"] > 0:
             with c_act1:
                 if versions and st.button(":material/edit: Edit", key=f"home_edit_{exp['id']}", use_container_width=True):
                     load_version_into_workshop(db, exp, versions[-1])
-                    st.switch_page(f"{_p_prefix}1_Prompt_Workshop.py")
+                    st.switch_page("views/1_Prompt_Workshop.py")
             with c_act2:
                 if st.button(":material/biotech: Eval", key=f"home_eval_{exp['id']}", use_container_width=True):
                     st.session_state["current_experiment_id"] = exp["id"]
                     if versions:
                         st.session_state["current_version_id"] = versions[-1]["id"]
-                    st.switch_page(f"{_p_prefix}2_Evaluation_Lab.py")
+                    st.switch_page("views/2_Evaluation_Lab.py")
 
     st.markdown("")
     col_chart1, col_chart2 = st.columns(2)
@@ -180,6 +180,6 @@ else:
                     st.caption((desc[:75] + "…") if len(desc) > 75 else desc)
                     if st.button(":material/edit_note: Open in Workshop", key=f"qt_{tmpl['id']}", use_container_width=True):
                         load_template_into_workshop(tmpl)
-                        st.switch_page(f"{_p_prefix}1_Prompt_Workshop.py")
+                        st.switch_page("views/1_Prompt_Workshop.py")
     else:
         st.info(":material/info: Your workspace is empty. Click '+ New Prompt' above to get started.")
