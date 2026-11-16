@@ -12,7 +12,7 @@ from src.schemas import (
     LLMRequest, LLMResponse, PromptVersion, FewShotExample,
     PromptingTechnique, OutputFormat,
 )
-from src.template_engine import render_template
+from src.template_engine import render_template, extract_variables
 from src.providers.base import BaseLLMProvider
 from src.providers.demo_provider import DemoProvider
 from src.providers.openai_provider import OpenAIProvider
@@ -135,8 +135,14 @@ def construct_prompt(
     # Merge variables with input data
     all_vars = dict(variables or {})
     if input_data:
-        # Auto-assign input_data to common variable names if not already set
-        for var_name in ["input", "input_text", "text", "customer_feedback", "data", "content", "query"]:
+        # Extract variables from user template
+        extracted = extract_variables(user_template)
+        # If template has a single variable placeholder, bind input_data to it
+        if len(extracted) == 1 and extracted[0] not in all_vars:
+            all_vars[extracted[0]] = input_data
+
+        # Auto-assign input_data to any remaining common/declared variable names if not already set
+        for var_name in extracted + ["input", "input_text", "text", "customer_feedback", "data", "content", "query", "dataset", "review", "article", "document", "code"]:
             if var_name not in all_vars:
                 all_vars[var_name] = input_data
 

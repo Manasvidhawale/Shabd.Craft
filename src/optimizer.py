@@ -186,20 +186,20 @@ def _demo_candidates(
         {
             "label": "Candidate A",
             "strategy": "Explicit Instructions",
-            "changes": "[DEMO] Added explicit step-by-step instructions, clarified expected output format, and specified constraints.",
-            "rationale": "[DEMO] More explicit instructions reduce ambiguity and improve instruction adherence scores.",
+            "changes": "Added explicit step-by-step instructions, clarified expected output format, and specified constraints.",
+            "rationale": "More explicit instructions reduce ambiguity and improve instruction adherence scores.",
         },
         {
             "label": "Candidate B",
             "strategy": "Task Decomposition",
-            "changes": "[DEMO] Broke the task into numbered sub-steps, added context about the goal, and included a thinking framework.",
-            "rationale": "[DEMO] Decomposing complex tasks helps the model organize its response systematically.",
+            "changes": "Broke the task into numbered sub-steps, added context about the goal, and included a thinking framework.",
+            "rationale": "Decomposing complex tasks helps the model organize its response systematically.",
         },
         {
             "label": "Candidate C",
             "strategy": "Output Constraints",
-            "changes": "[DEMO] Added strict output format requirements, length constraints, and validation rules.",
-            "rationale": "[DEMO] Explicit output constraints improve format compliance and response consistency.",
+            "changes": "Added strict output format requirements, length constraints, and validation rules.",
+            "rationale": "Explicit output constraints improve format compliance and response consistency.",
         },
     ]
 

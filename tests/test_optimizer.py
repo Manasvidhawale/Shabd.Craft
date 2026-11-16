@@ -57,11 +57,14 @@ class TestDemoCandidates:
             assert c1.candidate_label == c2.candidate_label
             assert c1.user_prompt_template == c2.user_prompt_template
 
-    def test_demo_label_in_changes(self):
+    def test_candidate_descriptions(self):
         version = self._make_version()
         candidates = _demo_candidates(version, "exp-1", 3, 70.0)
         for c in candidates:
-            assert "[DEMO]" in c.changes_description
+            assert c.changes_description != ""
+            assert len(c.changes_description) > 10
+            assert c.rationale != ""
+            assert len(c.rationale) > 10
 
 
 class TestParseOptimizerResponse:
