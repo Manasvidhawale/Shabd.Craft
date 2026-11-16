@@ -23,6 +23,8 @@ class OpenAIProvider(BaseLLMProvider):
 
     @property
     def provider_name(self) -> str:
+        if self._api_key and self._api_key.startswith("gsk_"):
+            return "groq"
         return "openai"
 
     @property
@@ -43,7 +45,14 @@ class OpenAIProvider(BaseLLMProvider):
         try:
             import openai
 
-            client = openai.OpenAI(api_key=self._api_key, timeout=settings.timeout)
+            is_groq = bool(self._api_key and self._api_key.startswith("gsk_"))
+            base_url = "https://api.groq.com/openai/v1" if is_groq else (settings.openai_base_url or None)
+            client = openai.OpenAI(api_key=self._api_key, base_url=base_url, timeout=settings.timeout)
+
+            # Auto-map model if running on Groq with an OpenAI model name
+            req_model = request.model
+            if is_groq and (req_model.startswith("gpt-") or req_model == "demo-simulator" or not req_model):
+                req_model = "llama-3.3-70b-versatile"
 
             messages = []
             if request.system_prompt:
@@ -52,7 +61,7 @@ class OpenAIProvider(BaseLLMProvider):
 
             start = time.time()
             response = client.chat.completions.create(
-                model=request.model,
+                model=req_model,
                 messages=messages,
                 temperature=request.temperature,
                 max_tokens=request.max_tokens,

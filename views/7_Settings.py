@@ -31,19 +31,22 @@ tab_api, tab_eval, tab_data = st.tabs(["API & Model", "Evaluation Preferences", 
 
 # ── Tab 1: API & Model ─────────────────────────────────────────────────
 with tab_api:
-    st.markdown("##### OpenAI API Connection")
+    st.markdown("##### LLM API Connection (OpenAI or Groq)")
 
     if settings.has_api_key and not settings.demo_mode:
-        st.success("OpenAI API key is active for this session.")
+        if settings.is_groq:
+            st.success("Groq API key is active. Using ultra-fast Groq endpoint (https://api.groq.com/openai/v1) with Llama 3 models.")
+        else:
+            st.success("OpenAI API key is active for this session.")
     else:
-        st.info("No OpenAI API key is active. Prompts run using the built-in local fallback.")
+        st.info("No API key is active. Prompts run using the built-in local fallback.")
 
     with st.form("api_key_form"):
         new_key = st.text_input(
-            "OpenAI API Key",
+            "API Key (OpenAI `sk-...` or Groq `gsk-...`)",
             value="",
             type="password",
-            placeholder="sk-... (stored in session only; never logged or saved to database)",
+            placeholder="sk-... or gsk-... (stored in session only; never logged or saved to database)",
         )
         col_k1, col_k2 = st.columns(2)
         save_key = col_k1.form_submit_button("Save API Key", type="primary", use_container_width=True)
