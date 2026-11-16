@@ -34,6 +34,7 @@ from src.template_engine import (
 from src.ui_helpers import (
     clear_workshop_widgets,
     get_database,
+    load_template_into_workshop,
     load_version_into_workshop,
     render_page_header,
 )
@@ -146,7 +147,8 @@ with bar1:
     st.session_state["ws_exp_name"] = exp_name
 with bar2:
     categories = [e.value for e in TaskCategory]
-    cat_idx = categories.index(st.session_state["ws_category"]) if st.session_state["ws_category"] in categories else 0
+    prev_cat = st.session_state.get("ws_category", "general")
+    cat_idx = categories.index(prev_cat) if prev_cat in categories else 0
     category = st.selectbox(
         "Task Category",
         categories,
@@ -154,7 +156,19 @@ with bar2:
         index=cat_idx,
         key="sel_category",
     )
-    st.session_state["ws_category"] = category
+    if category != prev_cat:
+        st.session_state["ws_category"] = category
+        if st.session_state.get("ws_editing_exp_id") is None and not st.session_state.get("ws_user", "").strip():
+            matched = [t for t in db.get_prompt_templates() if t.get("category") == category]
+            if matched:
+                load_template_into_workshop(matched[0])
+                st.rerun()
+
+    matched_templates = [t for t in db.get_prompt_templates() if t.get("category") == category]
+    if matched_templates and st.session_state.get("ws_editing_exp_id") is None:
+        if st.button("Load Category Template", key="btn_load_cat_starter", help=f"Pre-fill with recommended {category.replace('_', ' ').title()} template"):
+            load_template_into_workshop(matched_templates[0])
+            st.rerun()
 with bar3:
     model_list = settings.AVAILABLE_MODELS
     cur_model = st.session_state.get("ws_model", settings.default_model)
@@ -239,6 +253,13 @@ with left_col:
     )
     st.session_state["ws_sample_input"] = sample_input
 
+    if user_prompt and extract_variables(user_prompt) and not sample_input.strip():
+        sample_cand = "The product arrived on time, but customer support took 3 days to reply to my urgent ticket."
+        if st.button("Fill Sample Data for Testing", key="btn_fill_sample", help="Populate with realistic sample input to test this prompt"):
+            st.session_state["ws_sample_input"] = sample_cand
+            st.session_state["ta_sample"] = sample_cand
+            st.rerun()
+
     with st.expander("Parameters & Expected Output (Optional)", expanded=False):
         p1, p2 = st.columns(2)
         with p1:
@@ -315,6 +336,8 @@ with right_col:
             st.markdown("**Rendered Prompt:**")
             st.code(rendered[:2000], language="text")
             st.caption(f"Words: {len(rendered.split())} · Characters: {len(rendered)}")
+            if variables and not sample_input.strip():
+                st.caption(f"ℹ️ Note: `[{variables[0]}]` above is a variable placeholder. Enter text in **Sample Input Data** on the left to preview it filled.")
         else:
             st.info("Enter a prompt template to see the live preview.")
 
