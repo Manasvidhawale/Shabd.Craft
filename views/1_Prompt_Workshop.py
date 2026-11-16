@@ -134,6 +134,18 @@ if selected_target != "__new__":
             st.session_state["ws_last_response"] = None
             clear_workshop_widgets()
             st.rerun()
+        elif selected_target == "__new__" and st.button("Clear Form", use_container_width=True, help="Wipe all prompt text and inputs to start fresh"):
+            st.session_state["ws_editing_exp_id"] = None
+            st.session_state["ws_editing_ver_id"] = None
+            st.session_state["ws_exp_name"] = ""
+            st.session_state["ws_system"] = ""
+            st.session_state["ws_user"] = ""
+            st.session_state["ws_sample_input"] = ""
+            st.session_state["ws_expected"] = ""
+            st.session_state["ws_few_shots"] = []
+            st.session_state["ws_last_response"] = None
+            clear_workshop_widgets()
+            st.rerun()
 
 # ── Command Bar ────────────────────────────────────────────────────────
 bar1, bar2, bar3 = st.columns([2, 1, 1])

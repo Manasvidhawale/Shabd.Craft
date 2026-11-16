@@ -124,7 +124,7 @@ with tab_data:
 
     # Add manually
     with st.expander("Add Test Case Manually"):
-        with st.form("add_tc_form"):
+        with st.form("add_tc_form", clear_on_submit=True):
             tc_input = st.text_area("Input Data", height=80, placeholder="Enter test input...")
             tc_expected = st.text_area("Expected Output (optional)", height=60)
             if st.form_submit_button("Add Test Case"):

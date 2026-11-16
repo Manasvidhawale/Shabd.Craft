@@ -213,7 +213,7 @@ with tab_create:
     if created_msg:
         st.success(created_msg)
 
-    with st.form("create_template"):
+    with st.form("create_template", clear_on_submit=True):
         ct_name = st.text_input("Prompt Name", placeholder="e.g., Support Ticket Classifier", key="ct_name")
         ct_desc = st.text_area("Description", height=60, placeholder="What does this prompt do?", key="ct_desc")
 
