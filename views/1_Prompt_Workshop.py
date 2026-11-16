@@ -414,11 +414,11 @@ def workshop_canvas():
                 else:
                     st.info(":material/info: Enter a prompt template on the left to see the live preview.")
 
-            # Last Execution Result Card
-            if st.session_state.get("ws_last_response"):
-                resp = st.session_state["ws_last_response"]
-                with st.container(border=True):
-                    st.markdown("##### Execution Result")
+            # Execution Console Card (Always present to balance layout)
+            with st.container(border=True):
+                st.markdown("##### Execution Console")
+                if st.session_state.get("ws_last_response"):
+                    resp = st.session_state["ws_last_response"]
                     st.code(resp.get("content", ""), language="text")
 
                     rc1, rc2, rc3 = st.columns(3)
@@ -434,6 +434,8 @@ def workshop_canvas():
                     if h_meta:
                         stat_badge = status_badge("pass" if h_meta["passed_contract"] else "fail", "PASS" if h_meta["passed_contract"] else "FAIL")
                         st.caption(f"Harness: {stat_badge} · Attempts: **{h_meta['attempts']}** · Repaired: **{h_meta['repaired']}**")
+                else:
+                    st.info(":material/play_circle: **Console Idle** — Click **Run Prompt** below to execute against the model. Streaming output, latency, token metrics, and auto-repair validations will appear here.")
 
         with tab_export:
             with st.container(border=True):
@@ -510,38 +512,40 @@ def _collect_few_shots() -> list[dict]:
     ]
 
 
-if editing_exp_id and editing_ver_id:
-    ver_label_val = st.text_input(
-        "Version Label",
-        value=db.get_prompt_version(editing_ver_id).get("version_label", "Updated") if db.get_prompt_version(editing_ver_id) else "Updated",
-        key="ws_ver_label_input",
-    )
-    b1, b2, b3, b4, b5 = st.columns(5)
-    with b1:
-        run_clicked = st.button(":material/play_arrow: Run Prompt", type="primary", use_container_width=True)
-    with b2:
-        update_clicked = st.button(":material/save: Save Changes", use_container_width=True)
-    with b3:
-        new_ver_clicked = st.button(":material/add_circle: New Version", use_container_width=True)
-    with b4:
-        eval_clicked = st.button(":material/biotech: Evaluate", use_container_width=True)
-    with b5:
-        delete_clicked = st.button(":material/delete: Delete", use_container_width=True)
-    save_new_clicked = False
-    reset_clicked = False
-else:
-    b1, b2, b3, b4 = st.columns(4)
-    with b1:
-        run_clicked = st.button(":material/play_arrow: Run Prompt", type="primary", use_container_width=True)
-    with b2:
-        save_new_clicked = st.button(":material/save: Save Prompt", use_container_width=True)
-    with b3:
-        eval_clicked = st.button(":material/biotech: Send to Evaluation", use_container_width=True)
-    with b4:
-        reset_clicked = st.button(":material/restart_alt: Clear Form", use_container_width=True)
-    update_clicked = False
-    new_ver_clicked = False
-    delete_clicked = False
+with st.container(border=True):
+    if editing_exp_id and editing_ver_id:
+        ver_label_val = st.text_input(
+            "Version Label",
+            value=db.get_prompt_version(editing_ver_id).get("version_label", "Updated") if db.get_prompt_version(editing_ver_id) else "Updated",
+            key="ws_ver_label_input",
+        )
+        b1, b2, b3, b4, b5 = st.columns([2, 1.5, 1.5, 1.5, 1])
+        with b1:
+            run_clicked = st.button(":material/play_arrow: Run Prompt", type="primary", use_container_width=True)
+        with b2:
+            update_clicked = st.button(":material/save: Save Changes", use_container_width=True)
+        with b3:
+            new_ver_clicked = st.button(":material/add_circle: New Version", use_container_width=True)
+        with b4:
+            eval_clicked = st.button(":material/biotech: Evaluate", use_container_width=True)
+        with b5:
+            delete_clicked = st.button(":material/delete: Delete", use_container_width=True)
+        save_new_clicked = False
+        reset_clicked = False
+    else:
+        b1, b2, b3, b4 = st.columns([2, 1.5, 1.5, 1])
+        with b1:
+            run_clicked = st.button(":material/play_arrow: Run Prompt", type="primary", use_container_width=True)
+        with b2:
+            save_new_clicked = st.button(":material/save: Save Prompt", use_container_width=True)
+        with b3:
+            eval_clicked = st.button(":material/biotech: Send to Evaluation", use_container_width=True)
+        with b4:
+            reset_clicked = st.button(":material/restart_alt: Clear Form", use_container_width=True)
+        update_clicked = False
+        new_ver_clicked = False
+        delete_clicked = False
+        ver_label_val = "Initial"
 
 if delete_clicked and editing_exp_id:
     confirm_delete_dialog(editing_exp_id, editing_ver_id, len(selected_versions))

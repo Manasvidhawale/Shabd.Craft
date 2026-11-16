@@ -65,3 +65,15 @@ def test_settings_page_renders_without_errors():
     at = AppTest.from_file(str(_ROOT / "views" / "7_Settings.py"), default_timeout=15)
     at.run()
     assert not at.exception
+
+
+def test_all_python_files_are_valid_in_python_311():
+    """Verify every Python file parses cleanly under Python 3.11 without syntax errors."""
+    import ast
+    for py_file in _ROOT.glob("**/*.py"):
+        if "venv" in py_file.parts or ".git" in py_file.parts:
+            continue
+        source = py_file.read_text(encoding="utf-8")
+        # ast.parse guarantees Python 3.11 syntax compliance (e.g. no backslashes in f-strings)
+        ast.parse(source, filename=str(py_file))
+

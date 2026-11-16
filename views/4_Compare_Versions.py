@@ -226,11 +226,13 @@ if compare_mode == "Multi-Model Arena (Model Battle)":
         if st.session_state.get("arena_referee_result"):
             ref = st.session_state["arena_referee_result"]
             winner = ref["winner"]
+            model_a_name = ar.get("model_a", "Model A")
+            model_b_name = ar.get("model_b", "Model B")
             with st.container(border=True):
                 if winner == "A":
-                    st.markdown(f"**Referee Verdict:** {status_badge('success', f'WINNER: Model A ({ar[\"model_a\"]})')}")
+                    st.markdown(f"**Referee Verdict:** {status_badge('success', f'WINNER: Model A ({model_a_name})')}")
                 elif winner == "B":
-                    st.markdown(f"**Referee Verdict:** {status_badge('success', f'WINNER: Model B ({ar[\"model_b\"]})')}")
+                    st.markdown(f"**Referee Verdict:** {status_badge('success', f'WINNER: Model B ({model_b_name})')}")
                 elif winner == "tie":
                     st.markdown(f"**Referee Verdict:** {status_badge('info', 'STATISTICAL TIE')}")
                 else:
