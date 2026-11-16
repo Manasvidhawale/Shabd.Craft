@@ -45,6 +45,25 @@ class TestValidateOutputContract:
     def test_valid_json_passes(self):
         assert validate_output_contract('{"sentiment": "positive"}', OutputFormat.JSON) == []
 
+    def test_json_missing_required_keys_fails(self):
+        errs = validate_output_contract(
+            '{"sentiment": "positive"}',
+            OutputFormat.JSON,
+            required_json_keys=["category", "priority"],
+        )
+        assert len(errs) == 1
+        assert "missing required keys" in errs[0].lower()
+        assert "category" in errs[0]
+        assert "priority" in errs[0]
+
+    def test_json_with_all_required_keys_passes(self):
+        errs = validate_output_contract(
+            '{"category": "billing", "sentiment": "negative", "priority": "high"}',
+            OutputFormat.JSON,
+            required_json_keys=["category", "sentiment", "priority"],
+        )
+        assert errs == []
+
     def test_invalid_json_fails(self):
         errs = validate_output_contract("Here is your JSON: {bad", OutputFormat.JSON)
         assert len(errs) == 1

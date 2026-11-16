@@ -8,7 +8,10 @@ Calculates weighted scores and manages evaluation workflows.
 from __future__ import annotations
 
 from typing import Optional
+from concurrent.futures import ThreadPoolExecutor, as_completed
+import threading
 
+from src.config import settings
 from src.schemas import (
     CriterionScore, EvaluationResult, EvaluationWeights,
     EvaluationMethod, ExecutionStatus, PromptVersion,
@@ -16,7 +19,7 @@ from src.schemas import (
 )
 from src.rule_based_evaluator import evaluate_rule_based
 from src.llm_judge import evaluate_with_llm_judge
-from src.prompt_engine import execute_prompt, get_provider
+from src.prompt_engine import execute_prompt, get_provider, construct_prompt
 
 
 def calculate_weighted_score(
@@ -45,13 +48,14 @@ def evaluate_single(
     required_keywords: list[str] | None = None,
     max_words: int | None = None,
     required_fields: list[str] | None = None,
+    judge_model: str | None = None,
 ) -> EvaluationResult:
     """
     Evaluate a single test case against a prompt version.
 
     Steps:
     1. Execute the prompt with test case input.
-    2. Evaluate the response using the configured method.
+    2. Evaluate the response using the configured method (using a decoupled Judge model).
     3. Calculate weighted score.
     4. Return a complete EvaluationResult.
     """
@@ -91,14 +95,26 @@ def evaluate_single(
 
     if method in (EvaluationMethod.LLM_JUDGE, EvaluationMethod.COMBINED):
         provider = get_provider()
-        task_instructions = f"{version.system_prompt}\n{version.user_prompt_template}"
+        # Resolve prompt template with actual input so the judge sees the real task instruction
+        # instead of raw unrendered Jinja/mustache code braces {{...}}
+        sys_res, user_res = construct_prompt(version, input_data=test_case.input_data)
+        task_instructions = f"System: {sys_res}\nUser: {user_res}" if sys_res else user_res
+
+        # Decouple the Judge: Never let the candidate model grade itself
+        if judge_model:
+            effective_judge = judge_model
+        elif settings.is_groq:
+            effective_judge = "llama-3.3-70b-versatile"
+        else:
+            effective_judge = "gpt-4o" if "gpt-4o" in settings.AVAILABLE_MODELS else (settings.default_model or "gpt-3.5-turbo")
+
         judge_result = evaluate_with_llm_judge(
             provider=provider,
             task_instructions=task_instructions,
             input_data=test_case.input_data,
             expected_output=test_case.expected_output,
             actual_output=generated_output,
-            model=version.model_name or "gpt-3.5-turbo",
+            model=effective_judge,
         )
 
         if method == EvaluationMethod.COMBINED and criterion_scores:
@@ -163,17 +179,26 @@ def evaluate_batch(
     required_keywords: list[str] | None = None,
     max_words: int | None = None,
     required_fields: list[str] | None = None,
+    judge_model: str | None = None,
+    max_workers: int = 4,
     progress_callback=None,
 ) -> list[EvaluationResult]:
     """
-    Evaluate a batch of test cases.
+    Evaluate a batch of test cases concurrently using ThreadPoolExecutor.
 
-    Continues on individual failures — partial results are preserved.
+    Preserves original test case ordering and continues on individual failures.
     """
-    results = []
-    for i, tc in enumerate(test_cases):
+    if not test_cases:
+        return []
+
+    results: list[Optional[EvaluationResult]] = [None] * len(test_cases)
+    lock = threading.Lock()
+    completed = 0
+
+    def _eval_worker(idx: int, tc: TestCase):
+        nonlocal completed
         try:
-            result = evaluate_single(
+            res = evaluate_single(
                 version=version,
                 test_case=tc,
                 experiment_id=experiment_id,
@@ -182,30 +207,43 @@ def evaluate_batch(
                 required_keywords=required_keywords,
                 max_words=max_words,
                 required_fields=required_fields,
+                judge_model=judge_model,
             )
-            results.append(result)
         except Exception as e:
-            results.append(EvaluationResult(
+            res = EvaluationResult(
                 test_case_id=tc.id,
                 prompt_version_id=version.id,
                 experiment_id=experiment_id,
                 execution_status=ExecutionStatus.FAILED,
                 error_message=str(e),
                 created_at=_now(),
-            ))
+            )
+        with lock:
+            results[idx] = res
+            completed += 1
+            if progress_callback:
+                progress_callback(completed, len(test_cases))
 
-        if progress_callback:
-            progress_callback(i + 1, len(test_cases))
+    num_workers = min(max(1, max_workers), len(test_cases))
+    if num_workers > 1:
+        with ThreadPoolExecutor(max_workers=num_workers) as executor:
+            futures = [executor.submit(_eval_worker, i, tc) for i, tc in enumerate(test_cases)]
+            for f in as_completed(futures):
+                f.result()
+    else:
+        for i, tc in enumerate(test_cases):
+            _eval_worker(i, tc)
 
-    return results
+    return [r for r in results if r is not None]
 
 
 def aggregate_results(results: list[EvaluationResult]) -> dict:
-    """Aggregate evaluation results into summary statistics."""
+    """Aggregate evaluation results into summary statistics and quantile telemetry."""
     if not results:
         return {
             "total": 0, "success": 0, "failed": 0,
             "avg_score": 0, "min_score": 0, "max_score": 0,
+            "p50_latency_ms": 0.0, "p95_latency_ms": 0.0, "score_std_dev": 0.0,
             "criterion_averages": {},
         }
 
@@ -214,6 +252,21 @@ def aggregate_results(results: list[EvaluationResult]) -> dict:
 
     scores = [r.overall_score for r in successful]
     avg_score = round(sum(scores) / len(scores), 1) if scores else 0.0
+
+    import math
+    std_dev = 0.0
+    if len(scores) > 1:
+        variance = sum((s - avg_score) ** 2 for s in scores) / len(scores)
+        std_dev = round(math.sqrt(variance), 1)
+
+    latencies = sorted(r.latency_ms for r in successful if r.latency_ms > 0)
+    p50_lat = 0.0
+    p95_lat = 0.0
+    if latencies:
+        p50_idx = int(len(latencies) * 0.50)
+        p95_idx = min(len(latencies) - 1, int(len(latencies) * 0.95))
+        p50_lat = round(latencies[p50_idx], 1)
+        p95_lat = round(latencies[p95_idx], 1)
 
     # Criterion averages
     criterion_totals: dict[str, list[float]] = {}
@@ -230,6 +283,9 @@ def aggregate_results(results: list[EvaluationResult]) -> dict:
         "success": len(successful),
         "failed": len(failed),
         "avg_score": avg_score,
+        "score_std_dev": std_dev,
+        "p50_latency_ms": p50_lat,
+        "p95_latency_ms": p95_lat,
         "min_score": round(min(scores), 1) if scores else 0.0,
         "max_score": round(max(scores), 1) if scores else 0.0,
         "criterion_averages": criterion_averages,

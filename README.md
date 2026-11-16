@@ -35,14 +35,15 @@ Prompt engineering is widely practiced but rarely systematic. Most practitioners
 
 | Feature | Description |
 |---|---|
-| **Prompt Workshop** | Interactive IDE-like editor for all 7 prompting techniques + production code export |
-| **Evaluation Lab** | Rule-based & LLM-as-a-Judge evaluation plus Prompt Injection Security Audit |
-| **Prompt Optimizer** | AI-powered candidate generation with evidence-based recommendations |
-| **Version Comparison** | Inline word-level prompt diff, side-by-side outputs, and interactive charts |
-| **Experiment History** | SQLite-backed persistent experiment storage |
-| **Prompt Library** | 9 built-in templates + user-created template management |
-| **Demo Mode** | Full functionality without an API key (clearly labeled simulated outputs) |
-| **Analytics Dashboard** | Live metrics, score distributions, and performance trends |
+| **Prompt Workshop** | Reactive IDE-like canvas with live token meter, cost estimation, 7 techniques & production SDK code export |
+| **Evaluation Lab** | Multi-worker background coordinator thread, Stop/Cancel support, rubric evaluator & adversarial security audit |
+| **Prompt Optimizer** | Autonomous generational hill-climbing mutations & 1-shot candidate generation with benchmark tracking |
+| **Version Comparison** | Inline word-level HTML diff, side-by-side outputs, and Multi-Model Arena with position-swap AI referee |
+| **Runtime Harness** | Self-repairing contract enforcement with reflection loops and CI/CD quality gate CLI |
+| **Guardrails** | Input/output PII redaction, prompt injection neutralization, and system prompt leakage filters |
+| **Experiment History** | SQLite-backed persistent experiment lineage, duplication, and bulk JSON/CSV exports |
+| **Prompt Library** | 9 built-in starter templates + user custom template repository |
+| **Universal Connectivity** | Native support for OpenAI models, Groq endpoints, custom base URLs, or offline simulated demo mode |
 
 ---
 
@@ -130,26 +131,28 @@ Shabd.Craft/
 │   └── 7_Settings.py               # Configuration
 │
 ├── src/
-│   ├── config.py                   # Settings & environment
-│   ├── schemas.py                  # Pydantic data models
-│   ├── database.py                 # SQLite persistence layer
-│   ├── prompt_engine.py            # Prompt construction & execution
-│   ├── template_engine.py          # {{variable}} substitution
-│   ├── evaluation_engine.py        # Evaluation orchestration
-│   ├── rule_based_evaluator.py     # Deterministic evaluation
-│   ├── llm_judge.py                # LLM-as-a-Judge evaluator
-│   ├── security_evaluator.py       # Prompt injection & defense audit
+│   ├── config.py                   # Settings, Groq detection & environment
+│   ├── schemas.py                  # Pydantic data models & validators
+│   ├── database.py                 # SQLite persistence layer & transactions
+│   ├── prompt_engine.py            # Prompt construction & provider execution
+│   ├── template_engine.py          # {{variable}} extraction & substitution
+│   ├── evaluation_engine.py        # Evaluation orchestration & aggregation
+│   ├── rule_based_evaluator.py     # Deterministic evaluation checks
+│   ├── llm_judge.py                # LLM-as-a-Judge & position-swap referee
+│   ├── security_evaluator.py       # Prompt injection & defense audit suite
 │   ├── guardrails.py               # Input/output PII, injection & leak filters
-│   ├── harness.py                  # Runtime auto-repair & CI quality gate
+│   ├── harness.py                  # Runtime auto-repair & CI quality gate CLI
+│   ├── test_synthesizer.py         # Multi-column CSV mapping & case synthesis
 │   ├── ui_helpers.py               # Shared UI state & header helpers
-│   ├── optimizer.py                # Prompt optimization candidates
-│   ├── comparison_engine.py        # Version comparison & diff helper
-│   ├── experiment_service.py       # Experiment lifecycle
-│   ├── export_service.py           # CSV/JSON & code snippet export
+│   ├── ui_theme.py                 # Central WCAG AA tokens, fonts & focus rings
+│   ├── optimizer.py                # Autonomous hill-climbing & candidates
+│   ├── comparison_engine.py        # Version comparison & HTML word diff
+│   ├── experiment_service.py       # Experiment lifecycle & duplication
+│   ├── export_service.py           # Production SDK code generation & exports
 │   └── providers/
 │       ├── base.py                 # Abstract provider interface
-│       ├── openai_provider.py      # OpenAI API integration
-│       └── demo_provider.py        # Demo mode provider
+│       ├── openai_provider.py      # OpenAI & Groq API integration
+│       └── demo_provider.py        # Offline simulated provider
 │
 ├── data/
 │   ├── sample_prompts.json         # 9 built-in prompt templates
@@ -274,20 +277,22 @@ py -m pytest tests/test_evaluation.py -v
 python -m src.harness --experiment "My Experiment" --min-score 75 --min-security 80
 ```
 
-**Test coverage:**
+**Test coverage (177 tests passing):**
 
 | Test File | Tests | Covers |
 |---|---|---|
-| `test_prompt_engine.py` | 21 | Template engine, prompt construction, few-shot, CoT, decomposition |
-| `test_evaluation.py` | 18 | Weights, scoring, rule-based evaluator, aggregation |
-| `test_security_evaluator.py` | 9 | Prompt injection checks, static posture, hardening |
-| `test_guardrails.py` | 11 | Input/output PII redaction, injection blocking, leak filter |
-| `test_harness.py` | 11 | Input sanitization, auto-repair retries, quality gate & CLI |
-| `test_comparison_engine.py` | 4 | Version comparison, HTML word-level diff |
-| `test_export_service.py` | 2 | Production code generation (OpenAI SDK, LangChain, cURL) |
-| `test_optimizer.py` | 16 | Candidate generation, JSON parsing, recommendation |
-| `test_database.py` | 19 | All SQLite CRUD operations & version deletion |
-| `test_schemas.py` | 36 | All Pydantic schemas and validators |
+| `test_prompt_engine.py` | 25 | Template engine, 7 prompting techniques, variables & Groq detection |
+| `test_evaluation.py` | 22 | Multi-criteria weights, scoring, rule-based checks, position bias & verbosity |
+| `test_schemas.py` | 36 | All Pydantic data schemas, enums, validators and serialization |
+| `test_database.py` | 20 | All SQLite CRUD operations, version deletion & dependencies cleanup |
+| `test_optimizer.py` | 17 | Autonomous generational hill-climbing mutations & recommendations |
+| `test_guardrails.py` | 14 | Input/output PII redaction, prompt injection & system leak filters |
+| `test_harness.py` | 13 | Input sanitization, auto-repair retry reflection, quality gate & CLI |
+| `test_ui_smoke.py` | 10 | Streamlit AppTest across all 8 views + app.py entrypoint + Python 3.11 AST validation |
+| `test_security_evaluator.py` | 9 | Multi-vector prompt injection attacks, static posture & hardening |
+| `test_comparison_engine.py` | 4 | Version comparison, HTML word-level diffing & arena battles |
+| `test_synthesizer.py` | 4 | Multi-column CSV variable packing and test case synthesis |
+| `test_export_service.py` | 3 | Production SDK code generation (OpenAI Python, LangChain, cURL) |
 
 All tests run **without network access or API keys** (LLM calls are mocked).
 
@@ -351,14 +356,12 @@ See [`docs/evaluation_methodology.md`](docs/evaluation_methodology.md) for full 
 
 ---
 
-## ⚠️ Known Limitations
+## ⚠️ Known Limitations & Boundaries
 
-1. **Single-user only** — No authentication, multi-tenancy, or role-based access.
-2. **OpenAI only** — Other providers (Anthropic, Gemini) not yet integrated.
-3. **No async execution** — Long batch evaluations block the UI thread.
-4. **LLM judge variance** — Evaluation scores can differ between runs.
-5. **No result versioning** — Re-running an experiment appends new results.
-6. **Demo scores are deterministic** — Not representative of real model performance.
+1. **Single-user architecture** — Local embedded persistence without multi-tenant authentication.
+2. **Provider Scope** — Native live execution supports OpenAI models, Groq API, and compatible OpenAI-spec endpoints (Ollama, vLLM, LiteLLM). Anthropic and Gemini require proxy routing or export code.
+3. **LLM Judge Variance** — Evaluation scores can naturally vary between runs due to model non-determinism (mitigated via temperature=0 and position-swap bias detection).
+4. **Demo Mode Simulation** — Offline demo scores are deterministic approximations for evaluation without live API keys.
 
 ---
 

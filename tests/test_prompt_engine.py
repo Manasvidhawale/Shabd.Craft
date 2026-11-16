@@ -193,3 +193,9 @@ class TestPromptEngine:
         _, user = construct_prompt(version, input_data="report")
         assert not user.startswith("Complete this task sequentially")
         assert "Step 1: Read." in user
+
+    def test_groq_provider_detection(self):
+        from src.providers.openai_provider import OpenAIProvider
+        provider = OpenAIProvider(api_key="gsk_test123456789")
+        assert provider.provider_name == "groq"
+        assert provider.is_available() is True

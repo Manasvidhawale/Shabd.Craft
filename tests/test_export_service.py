@@ -33,5 +33,20 @@ class TestGenerateProductionCode:
             model="demo-simulator",
         )
         assert "demo-simulator" not in snippets["openai_python"]
-        assert "gpt-3.5-turbo" in snippets["openai_python"]
+
+    def test_generates_hardened_harness_python_syntax(self):
+        snippets = generate_production_code(
+            system_prompt="You are a classifier.",
+            user_prompt="Classify: {{input}}",
+            model="gpt-4o",
+            include_harness=True,
+            output_format="json",
+            required_json_keys=["category", "sentiment"],
+        )
+        parsed = ast.parse(snippets["openai_python"])
+        assert parsed is not None
+        assert "execute_with_harness" in snippets["openai_python"]
+        assert "sanitize_untrusted_input" in snippets["openai_python"]
+        assert "category" in snippets["openai_python"]
+        assert "gpt-4o" in snippets["openai_python"]
 

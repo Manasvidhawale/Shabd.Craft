@@ -129,6 +129,27 @@ class TestEvaluationResults:
         assert len(results) == 1
         assert results[0]["overall_score"] == 85.0
 
+    def test_bulk_save_evaluation_results(self, db):
+        exp = Experiment(name="Test")
+        exp_id = db.create_experiment(exp)
+        ver = PromptVersion(experiment_id=exp_id, user_prompt_template="test")
+        db.save_prompt_version(ver)
+        tc = TestCase(input_data="input")
+        db.save_test_case(tc, exp_id)
+
+        ers = [
+            EvaluationResult(
+                test_case_id=tc.id,
+                prompt_version_id=ver.id,
+                experiment_id=exp_id,
+                overall_score=float(80 + i),
+                execution_status=ExecutionStatus.SUCCESS,
+            ) for i in range(5)
+        ]
+        db.save_evaluation_results_bulk(ers)
+        results = db.get_evaluation_results(exp_id)
+        assert len(results) == 5
+
 
 class TestDashboardMetrics:
     def test_empty_metrics(self, db):

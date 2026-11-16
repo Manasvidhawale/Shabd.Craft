@@ -154,3 +154,72 @@ class TestAggregateResults:
         assert agg["success"] == 1
         assert agg["failed"] == 1
         assert agg["avg_score"] == 70.0
+
+
+class TestVerbosityPenaltyAndPairwiseJudge:
+    def test_verbosity_penalty_applied_on_bloat(self):
+        from src.llm_judge import apply_verbosity_penalty
+        expected = "Yes, order 123 is shipped."  # 5 words
+        # 60 words (bloated)
+        bloated = "Indeed, upon careful inspection of the logistical database records and cross-referencing with carrier tracking manifests, I can affirmatively confirm without any shadow of ambiguity that your order designated with identifier 123 has indeed been formally dispatched from the regional sorting facility and is currently in active transit across designated transit corridors toward your destination address."
+        penalized, notice = apply_verbosity_penalty(bloated, expected, base_score=95.0)
+        assert penalized < 95.0
+        assert notice is not None
+        assert "Verbosity bias penalty applied" in notice
+
+    def test_verbosity_penalty_not_applied_on_concise(self):
+        from src.llm_judge import apply_verbosity_penalty
+        expected = "Order 123 has been shipped."
+        actual = "Your order 123 has shipped."
+        score, notice = apply_verbosity_penalty(actual, expected, base_score=90.0)
+        assert score == 90.0
+        assert notice is None
+
+    def test_pairwise_position_swap_demo(self):
+        from src.llm_judge import evaluate_pairwise_position_swap
+        from src.providers.demo_provider import DemoProvider
+        provider = DemoProvider()
+        res = evaluate_pairwise_position_swap(
+            provider,
+            instruction="Summarize feedback",
+            input_data="Slow delivery",
+            candidate_a="Delivery took 4 days.",
+            candidate_b="Delayed shipping reported.",
+        )
+        assert "winner" in res
+        assert "score_a" in res
+        assert "score_b" in res
+        assert res["position_bias_detected"] is False
+
+    def test_concurrent_batch_evaluation_preserves_order(self):
+        from src.evaluation_engine import evaluate_batch
+        from src.schemas import PromptVersion, TestCase, EvaluationWeights, EvaluationMethod
+
+        version = PromptVersion(
+            experiment_id="e1",
+            user_prompt_template="Echo: {{input}}",
+        )
+        test_cases = [
+            TestCase(id=f"tc_{i}", input_data=f"Input message {i}", expected_output=f"Output {i}")
+            for i in range(8)
+        ]
+        weights = EvaluationWeights(accuracy=1, relevance=1, instruction_adherence=1, clarity=1, format_compliance=1)
+
+        progress_calls = []
+        def _on_prog(cur, tot):
+            progress_calls.append((cur, tot))
+
+        results = evaluate_batch(
+            version=version,
+            test_cases=test_cases,
+            experiment_id="e1",
+            weights=weights,
+            method=EvaluationMethod.RULE_BASED,
+            max_workers=4,
+            progress_callback=_on_prog,
+        )
+
+        assert len(results) == 8
+        for i, res in enumerate(results):
+            assert res.test_case_id == f"tc_{i}"
+        assert len(progress_calls) == 8

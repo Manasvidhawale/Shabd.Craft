@@ -214,3 +214,34 @@ class TestGenerateCandidatesDemo:
         for c in candidates:
             assert isinstance(c, OptimizationCandidate)
             assert c.experiment_id == "exp-1"
+
+
+class TestIterativeOptimization:
+    def test_run_iterative_optimization_converges(self):
+        from src.optimizer import run_iterative_optimization
+        from src.schemas import TestCase, EvaluationWeights
+
+        version = PromptVersion(
+            experiment_id="exp-1",
+            user_prompt_template="Summarize: {{input}}",
+            system_prompt="You are a helpful assistant.",
+        )
+        test_cases = [
+            TestCase(input_data="Customer ticket about billing issue.", expected_output="Billing issue summary"),
+            TestCase(input_data="Slow delivery reported.", expected_output="Delivery delay summary"),
+        ]
+        weights = EvaluationWeights(accuracy=1, relevance=1, instruction_adherence=1, clarity=1, format_compliance=1)
+
+        res = run_iterative_optimization(
+            original_version=version,
+            test_cases=test_cases,
+            experiment_id="exp-1",
+            weights=weights,
+            max_rounds=2,
+        )
+
+        assert "initial_score" in res
+        assert "final_score" in res
+        assert "rounds_executed" in res
+        assert "history" in res
+        assert len(res["history"]) >= 1

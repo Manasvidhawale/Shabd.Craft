@@ -67,9 +67,11 @@ def validate_output_contract(
     output_format: OutputFormat,
     required_keywords: list[str] | None = None,
     max_words: int | None = None,
+    required_json_keys: list[str] | None = None,
 ) -> list[str]:
     """
-    Validate LLM output against deterministic format and constraint rules.
+    Validate LLM output against deterministic format and constraint rules,
+    including strict JSON schema property enforcement.
 
     Returns a list of violation descriptions; an empty list means valid.
     """
@@ -81,7 +83,14 @@ def validate_output_contract(
 
     if output_format == OutputFormat.JSON:
         try:
-            json.loads(text)
+            parsed = json.loads(text)
+            if required_json_keys:
+                if not isinstance(parsed, dict):
+                    violations.append("JSON output must be a key-value object containing the required properties.")
+                else:
+                    missing = [k for k in required_json_keys if k not in parsed]
+                    if missing:
+                        violations.append(f"JSON object is missing required keys: {', '.join(missing)}.")
         except json.JSONDecodeError as exc:
             violations.append(f"Invalid JSON output ({exc.msg}).")
     elif output_format == OutputFormat.BULLET_POINTS:
@@ -113,6 +122,7 @@ def execute_with_harness(
     variables: dict[str, str] | None = None,
     required_keywords: list[str] | None = None,
     max_words: int | None = None,
+    required_json_keys: list[str] | None = None,
     max_retries: int | None = None,
     sanitize_input: bool = True,
     enable_guardrails: bool = False,
@@ -191,6 +201,7 @@ def execute_with_harness(
             output_format=version.output_format,
             required_keywords=required_keywords,
             max_words=max_words,
+            required_json_keys=required_json_keys,
         )
         if not violations:
             break

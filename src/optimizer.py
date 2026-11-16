@@ -142,6 +142,10 @@ def _parse_optimizer_response(
     """Parse the optimizer's JSON response into candidates."""
     try:
         content = content.strip()
+        if content.startswith("```"):
+            lines = content.split("\n")
+            content = "\n".join(lines[1:-1] if lines[-1].strip() == "```" else lines[1:])
+            content = content.strip()
         if not content.startswith("{"):
             import re
             json_match = re.search(r'\{[\s\S]*\}', content)
@@ -285,4 +289,134 @@ def recommend_best(
         "limitations": limitations,
         "best_score": best_score,
         "original_score": original_score,
+    }
+
+
+def run_iterative_optimization(
+    original_version: PromptVersion,
+    test_cases: list,
+    experiment_id: str,
+    weights,
+    max_rounds: int = 3,
+    category: str = "general",
+    progress_callback=None,
+) -> dict:
+    """
+    Empirical Multi-Round Prompt Optimization (GEPRO / Hill-Climbing Loop).
+
+    In each generation:
+    1. Evaluates current best prompt against test cases.
+    2. Gathers failure modes, weaknesses, and lowest scoring criteria.
+    3. Generates candidate mutations targeting the specific failure modes.
+    4. Evaluates candidate mutations on test cases.
+    5. Keeps the winning mutation if it improves the score (hill-climbing).
+    6. Stops early if score plateau is reached or target score achieved.
+    """
+    from src.evaluation_engine import evaluate_batch, aggregate_results
+
+    if not test_cases:
+        return {
+            "initial_score": 0.0,
+            "final_score": 0.0,
+            "rounds_executed": 0,
+            "best_version": original_version,
+            "history": [],
+            "converged": False,
+        }
+
+    # Round 0: Evaluate baseline
+    baseline_results = evaluate_batch(original_version, test_cases, experiment_id, weights)
+    baseline_agg = aggregate_results(baseline_results)
+    current_score = baseline_agg["avg_score"]
+    best_version = original_version
+    current_eval_results = baseline_results
+
+    history = [{
+        "round": 0,
+        "label": "Baseline",
+        "score": current_score,
+        "system_prompt": original_version.system_prompt,
+        "user_prompt_template": original_version.user_prompt_template,
+        "strategy": "Original",
+    }]
+
+    rounds_run = 0
+    converged = False
+
+    for r in range(1, max_rounds + 1):
+        rounds_run = r
+        if progress_callback:
+            progress_callback(r, max_rounds, f"Optimization Generation {r}/{max_rounds} (Score: {current_score:.1f})...")
+
+        # Generate candidates based on latest evaluation failures
+        candidates = generate_candidates(
+            original_version=best_version,
+            evaluation_results=current_eval_results,
+            experiment_id=experiment_id,
+            num_candidates=2,
+            category=category,
+        )
+
+        round_best_cand = None
+        round_best_score = current_score
+        round_best_results = None
+
+        for cand in candidates:
+            cand_ver = PromptVersion(
+                experiment_id=experiment_id,
+                system_prompt=cand.system_prompt,
+                user_prompt_template=cand.user_prompt_template,
+                technique=best_version.technique,
+                output_format=best_version.output_format,
+                model_name=best_version.model_name,
+                temperature=best_version.temperature,
+                max_tokens=best_version.max_tokens,
+                few_shot_examples=best_version.few_shot_examples,
+            )
+            c_res = evaluate_batch(cand_ver, test_cases, experiment_id, weights)
+            c_agg = aggregate_results(c_res)
+            score = c_agg["avg_score"]
+
+            if score > round_best_score:
+                round_best_score = score
+                round_best_cand = cand
+                round_best_results = c_res
+
+        # Check for hill-climbing progress
+        if round_best_cand and round_best_score > current_score:
+            current_score = round_best_score
+            current_eval_results = round_best_results
+            best_version = PromptVersion(
+                experiment_id=experiment_id,
+                system_prompt=round_best_cand.system_prompt,
+                user_prompt_template=round_best_cand.user_prompt_template,
+                technique=best_version.technique,
+                output_format=best_version.output_format,
+                model_name=best_version.model_name,
+                temperature=best_version.temperature,
+                max_tokens=best_version.max_tokens,
+                few_shot_examples=best_version.few_shot_examples,
+                is_optimized=True,
+                optimization_strategy=round_best_cand.strategy,
+            )
+            history.append({
+                "round": r,
+                "label": round_best_cand.candidate_label,
+                "score": current_score,
+                "system_prompt": round_best_cand.system_prompt,
+                "user_prompt_template": round_best_cand.user_prompt_template,
+                "strategy": round_best_cand.strategy,
+            })
+        else:
+            # Score plateaued, early exit
+            converged = True
+            break
+
+    return {
+        "initial_score": baseline_agg["avg_score"],
+        "final_score": current_score,
+        "rounds_executed": rounds_run,
+        "best_version": best_version,
+        "history": history,
+        "converged": converged,
     }
