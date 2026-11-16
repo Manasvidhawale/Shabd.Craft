@@ -149,8 +149,8 @@ if existing_candidates:
     st.markdown("##### Optimization Candidates")
 
     for i, cand in enumerate(existing_candidates):
-        status_label = {"pending": "[PENDING]", "success": "[TESTED]", "failed": "[REMOVED]"}.get(cand["status"], "[PENDING]")
-        with st.expander(f"{status_label} {cand['candidate_label']} — {cand['strategy']}", expanded=(i == 0)):
+        status_label = {"pending": "(Pending)", "success": "(Tested)", "failed": "(Removed)"}.get(cand["status"], "(Pending)")
+        with st.expander(f"{cand['candidate_label']} — {cand['strategy']} {status_label}", expanded=(i == 0)):
             st.markdown(f"**Strategy:** {cand['strategy']}")
             st.markdown(f"**Changes:** {cand['changes_description']}")
             st.markdown(f"**Rationale:** {cand['rationale']}")
