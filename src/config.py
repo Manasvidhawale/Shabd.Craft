@@ -109,5 +109,21 @@ class Settings:
     }
 
 
+    # Maximum context window (in tokens) per model
+    MODEL_CONTEXT_WINDOWS = {
+        "openai/gpt-oss-20b": 131072,
+        "openai/gpt-oss-120b": 131072,
+        "qwen/qwen3.8-27b": 32768,
+        "gpt-3.5-turbo": 16385,
+        "gpt-4": 8192,
+        "gpt-4-turbo": 128000,
+        "gpt-4o": 128000,
+        "gpt-4o-mini": 128000,
+        "llama-3.3-70b-versatile": 128000,
+        "llama-3.1-8b-instant": 128000,
+        "mixtral-8x7b-32768": 32768,
+    }
+
+
 # Singleton settings instance
 settings = Settings()

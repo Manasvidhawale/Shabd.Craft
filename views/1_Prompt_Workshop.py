@@ -256,21 +256,53 @@ with left_col:
 
         st.session_state["ws_few_shots"] = examples
 
-    sample_input = st.text_area(
-        "Sample Input Data",
-        value=st.session_state["ws_sample_input"],
-        height=85,
-        placeholder="Enter sample data to test your prompt...",
-        key="ta_sample",
-    )
-    st.session_state["ws_sample_input"] = sample_input
+    detected_vars = extract_variables(user_prompt) if user_prompt else []
+    var_values: dict[str, str] = {}
+    if detected_vars:
+        st.markdown("##### Template Variable Inputs")
+        st.caption("Values entered here populate the `{{variable}}` placeholders in your prompt template.")
+        for v in detected_vars:
+            key_name = f"ws_var_{v}"
+            if key_name not in st.session_state:
+                st.session_state[key_name] = st.session_state.get("ws_sample_input", "")
+            val = st.text_area(
+                f"Input for {{{{{v}}}}}",
+                value=st.session_state[key_name],
+                height=80,
+                placeholder=f"Enter test value for {v}...",
+                key=f"ta_var_{v}",
+            )
+            var_values[v] = val
+            st.session_state[key_name] = val
 
-    if user_prompt and extract_variables(user_prompt) and not sample_input.strip():
-        sample_cand = "The product arrived on time, but customer support took 3 days to reply to my urgent ticket."
-        if st.button("Fill Sample Data for Testing", key="btn_fill_sample", help="Populate with realistic sample input to test this prompt"):
-            st.session_state["ws_sample_input"] = sample_cand
-            st.session_state["ta_sample"] = sample_cand
-            st.rerun()
+        sample_input = var_values.get(detected_vars[0], "")
+        st.session_state["ws_sample_input"] = sample_input
+
+        has_empty_var = any(not (var_values.get(v) or "").strip() for v in detected_vars)
+        if has_empty_var:
+            sample_defaults = {
+                "customer_feedback": "The product arrived on time, but customer support took 3 days to reply to my urgent ticket.",
+                "input": "Quarterly earnings report showed a 14% increase in operating margin.",
+                "text": "The quick brown fox jumps over the lazy dog.",
+                "code": "def process_data(items):\n    return [x.strip() for x in items if x]",
+                "query": "How do I configure OAuth2 with JWT authentication in FastAPI?",
+            }
+            if st.button("Fill Sample Data for Testing", key="btn_fill_sample", help="Populate with realistic sample input to test this prompt"):
+                for v in detected_vars:
+                    cand = sample_defaults.get(v, "Sample test value demonstrating production prompt behavior.")
+                    st.session_state[f"ws_var_{v}"] = cand
+                    st.session_state[f"ta_var_{v}"] = cand
+                st.session_state["ws_sample_input"] = st.session_state.get(f"ws_var_{detected_vars[0]}", "")
+                st.rerun()
+    else:
+        sample_input = st.text_area(
+            "Sample Input Data",
+            value=st.session_state["ws_sample_input"],
+            height=85,
+            placeholder="Enter sample data to test your prompt...",
+            key="ta_sample",
+        )
+        st.session_state["ws_sample_input"] = sample_input
 
     with st.expander("Parameters & Expected Output (Optional)", expanded=False):
         p1, p2 = st.columns(2)
@@ -298,6 +330,7 @@ with left_col:
         st.session_state["ws_use_harness"] = use_harness
         harness_keywords = None
         harness_max_words = None
+        harness_json_keys = None
         if use_harness:
             hc1, hc2 = st.columns(2)
             with hc1:
@@ -306,6 +339,14 @@ with left_col:
             with hc2:
                 mw_raw = st.number_input("Max Words (0 = no limit)", 0, 5000, 0, key="ws_harness_mw")
                 harness_max_words = mw_raw if mw_raw > 0 else None
+            if fmt == "json":
+                jk_raw = st.text_input(
+                    "Required JSON Schema Keys (comma-separated)",
+                    key="ws_harness_json_keys",
+                    placeholder="e.g. category, sentiment, priority",
+                    help="Enforces that output is valid JSON and contains all specified top-level keys.",
+                )
+                harness_json_keys = [k.strip() for k in jk_raw.split(",") if k.strip()] if jk_raw else None
 
         use_guardrails = st.checkbox(
             "Enable Input/Output Guardrails (PII, Injection & Leak Filter)",
@@ -342,14 +383,28 @@ with right_col:
             for w in validation["warnings"]:
                 st.warning(w)
 
-            var_values = {v: sample_input for v in variables} if sample_input else {}
             rendered = preview_template(user_prompt, var_values)
 
             st.markdown("**Rendered Prompt:**")
             st.code(rendered[:2000], language="text")
-            st.caption(f"Words: {len(rendered.split())} · Characters: {len(rendered)}")
-            if variables and not sample_input.strip():
-                st.caption(f"ℹ️ Note: `[{variables[0]}]` above is a variable placeholder. Enter text in **Sample Input Data** on the left to preview it filled.")
+
+            # Tokenizer, Context Window Consumption Meter & Real-Time Cost Gauge
+            est_tokens = max(1, int(len(rendered.split()) * 1.33))
+            max_ctx = settings.MODEL_CONTEXT_WINDOWS.get(model, 32768)
+            ctx_ratio = min(1.0, est_tokens / max_ctx)
+
+            tok_c1, tok_c2 = st.columns([3, 2])
+            with tok_c1:
+                st.caption(f"Words: {len(rendered.split())} · Characters: {len(rendered)} · Est. Tokens: ~{est_tokens:,}")
+            with tok_c2:
+                pricing = settings.MODEL_PRICING.get(model, {"input": 0.001, "output": 0.002})
+                cost_per_1k = (est_tokens / 1000.0) * pricing.get("input", 0.001) * 1000.0
+                st.caption(f"Est. Input Cost: ${cost_per_1k:.4f} / 1k runs")
+
+            st.progress(ctx_ratio, text=f"Context Consumption: {est_tokens:,} / {max_ctx:,} tokens ({ctx_ratio:.1%})")
+
+            if detected_vars and not any(var_values.values()):
+                st.caption(f"ℹ️ Note: `[{detected_vars[0]}]` above is a variable placeholder. Enter text in the variable input field on the left (or click **'Fill Sample Data for Testing'**) to preview the filled prompt.")
         else:
             st.info("Enter a prompt template to see the live preview.")
 
@@ -577,8 +632,10 @@ if run_clicked:
                 h_res = execute_with_harness(
                     version,
                     input_data=sample_input,
+                    variables=var_values,
                     required_keywords=harness_keywords,
                     max_words=harness_max_words,
+                    required_json_keys=harness_json_keys if use_harness else None,
                     max_retries=None if use_harness else 0,
                     enable_guardrails=use_guardrails,
                     block_injection=guard_block_inj,
@@ -596,7 +653,7 @@ if run_clicked:
                     "guardrail_report": h_res.get("guardrail_report"),
                 }
             else:
-                response = execute_prompt(version, input_data=sample_input)
+                response = execute_prompt(version, input_data=sample_input, variables=var_values)
                 resp_payload = response.model_dump()
 
         if response.error:

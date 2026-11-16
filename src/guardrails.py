@@ -8,6 +8,8 @@ Deterministic pre-execution and post-execution safety controls:
 
 from __future__ import annotations
 
+import base64
+import binascii
 import re
 
 _EMAIL_RE = re.compile(r"\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}\b")
@@ -26,6 +28,20 @@ _INJECTION_PATTERNS = (
     "</user_input>",
     "</context>",
     "</system>",
+    # Chat template delimiters
+    "<|im_start|>",
+    "<|im_end|>",
+    "[inst]",
+    "[/inst]",
+    "<<sys>>",
+    "<</sys>>",
+    "<s>",
+    "</s>",
+    # Role-collision escapes
+    "\nassistant:",
+    "\nsystem:",
+    "\nhuman:",
+    "\nuser:",
 )
 
 _LEAK_PHRASES = (
@@ -33,6 +49,24 @@ _LEAK_PHRASES = (
     "my system prompt is",
     "my hidden instructions are",
 )
+
+
+def scan_base64_injections(text: str) -> str | None:
+    """
+    Detect if any base64-encoded strings within text decode to known prompt injection patterns.
+    """
+    if not text:
+        return None
+    candidates = re.findall(r"[A-Za-z0-9+/]{16,}={0,2}", text)
+    for cand in candidates:
+        try:
+            decoded = base64.b64decode(cand, validate=True).decode("utf-8", errors="ignore").lower()
+            for pat in _INJECTION_PATTERNS:
+                if pat.strip() and pat.strip() in decoded:
+                    return f"Obfuscated base64 injection payload detected ('{pat.strip()}')"
+        except (binascii.Error, UnicodeDecodeError, ValueError):
+            continue
+    return None
 
 
 def redact_pii_and_secrets(text: str) -> tuple[str, list[str]]:
@@ -101,12 +135,14 @@ def check_input_guardrails(
             }
 
     inj_hits = [pat for pat in _INJECTION_PATTERNS if pat in lower]
-    if inj_hits:
+    b64_hit = scan_base64_injections(text) if block_injection else None
+    if inj_hits or b64_hit:
         if block_injection:
+            reason = b64_hit if b64_hit else f"Potential prompt injection detected ('{inj_hits[0]}')."
             return {
                 "allowed": False,
                 "processed_input": text,
-                "blocked_reason": f"Potential prompt injection detected ('{inj_hits[0]}').",
+                "blocked_reason": reason,
                 "redactions": [],
                 "warnings": [],
             }
