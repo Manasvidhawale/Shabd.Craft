@@ -214,11 +214,14 @@ if existing_candidates:
                             st.rerun()
 
             with ac2:
-                if cand["status"] == "success" and not cand.get("is_accepted"):
-                    if st.button("Accept", key=f"accept_{cand['id']}"):
-                        db.accept_candidate(cand["id"])
-                        st.success("Candidate accepted.")
-                        st.rerun()
+                if cand["status"] == "success":
+                    if not cand.get("is_accepted"):
+                        if st.button("Accept Candidate", key=f"accept_{cand['id']}"):
+                            db.accept_candidate(cand["id"])
+                            st.success("Candidate accepted.")
+                            st.rerun()
+                    else:
+                        st.success("Accepted")
 
             with ac3:
                 if st.button("Remove", key=f"remove_{cand['id']}"):

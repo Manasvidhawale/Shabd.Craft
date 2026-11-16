@@ -119,6 +119,17 @@ class TestPromptEngine:
         assert system == "You are a helper."
         assert "test data" in user
 
+    def test_construct_prompt_custom_single_variable(self):
+        version = PromptVersion(
+            experiment_id="test",
+            system_prompt="You are an analyst.",
+            user_prompt_template="Summarize this dataset:\n\n{{dataset}}",
+            technique=PromptingTechnique.ZERO_SHOT,
+        )
+        system, user = construct_prompt(version, input_data="Sales: Q1 $40k, Q2 $60k")
+        assert "Sales: Q1 $40k, Q2 $60k" in user
+        assert "{{dataset}}" not in user
+
     def test_construct_prompt_few_shot(self):
         version = PromptVersion(
             experiment_id="test",
