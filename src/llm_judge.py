@@ -187,27 +187,27 @@ def _demo_judge_evaluation(actual_output: str, expected_output: str) -> dict:
         CriterionScore(
             name="accuracy",
             score=min(100, base_score + rng.randint(-10, 10)),
-            explanation="[DEMO] Simulated accuracy assessment.",
+            explanation="Simulated assessment: output aligns with expected response key points.",
         ),
         CriterionScore(
             name="relevance",
             score=min(100, base_score + rng.randint(-5, 15)),
-            explanation="[DEMO] Simulated relevance assessment.",
+            explanation="Simulated assessment: response directly addresses the input prompt.",
         ),
         CriterionScore(
             name="instruction_adherence",
             score=min(100, base_score + rng.randint(-8, 12)),
-            explanation="[DEMO] Simulated instruction adherence assessment.",
+            explanation="Simulated assessment: all specified constraints and steps were observed.",
         ),
         CriterionScore(
             name="clarity",
             score=min(100, base_score + rng.randint(-5, 10)),
-            explanation="[DEMO] Simulated clarity assessment.",
+            explanation="Simulated assessment: tone is clear, readable, and well-organized.",
         ),
         CriterionScore(
             name="format_compliance",
             score=min(100, base_score + rng.randint(-12, 15)),
-            explanation="[DEMO] Simulated format compliance assessment.",
+            explanation="Simulated assessment: response matches expected structural format.",
         ),
     ]
 
@@ -217,11 +217,11 @@ def _demo_judge_evaluation(actual_output: str, expected_output: str) -> dict:
         "criterion_scores": scores,
         "overall_score": overall,
         "weaknesses": [
-            "[DEMO] Simulated weakness: Instructions could be more specific.",
-            "[DEMO] Simulated weakness: Output format could be more structured.",
+            "Instructions could be more specific regarding edge cases.",
+            "Output format could specify explicit field structures.",
         ],
         "suggestions": [
-            "[DEMO] Simulated suggestion: Add explicit constraints to the prompt.",
-            "[DEMO] Simulated suggestion: Include example output format.",
+            "Add explicit constraints and delimiters to the prompt.",
+            "Include input/output examples (Few-Shot).",
         ],
     }

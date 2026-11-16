@@ -149,8 +149,8 @@ if existing_candidates:
     st.markdown("##### Optimization Candidates")
 
     for i, cand in enumerate(existing_candidates):
-        status_label = {"pending": "[PENDING]", "success": "[TESTED]", "failed": "[REMOVED]"}.get(cand["status"], "[PENDING]")
-        with st.expander(f"{status_label} {cand['candidate_label']} — {cand['strategy']}", expanded=(i == 0)):
+        status_label = {"pending": "(Pending)", "success": "(Tested)", "failed": "(Removed)"}.get(cand["status"], "(Pending)")
+        with st.expander(f"{cand['candidate_label']} — {cand['strategy']} {status_label}", expanded=(i == 0)):
             st.markdown(f"**Strategy:** {cand['strategy']}")
             st.markdown(f"**Changes:** {cand['changes_description']}")
             st.markdown(f"**Rationale:** {cand['rationale']}")
@@ -214,11 +214,14 @@ if existing_candidates:
                             st.rerun()
 
             with ac2:
-                if cand["status"] == "success" and not cand.get("is_accepted"):
-                    if st.button("Accept", key=f"accept_{cand['id']}"):
-                        db.accept_candidate(cand["id"])
-                        st.success("Candidate accepted.")
-                        st.rerun()
+                if cand["status"] == "success":
+                    if not cand.get("is_accepted"):
+                        if st.button("Accept Candidate", key=f"accept_{cand['id']}"):
+                            db.accept_candidate(cand["id"])
+                            st.success("Candidate accepted.")
+                            st.rerun()
+                    else:
+                        st.success("Accepted")
 
             with ac3:
                 if st.button("Remove", key=f"remove_{cand['id']}"):

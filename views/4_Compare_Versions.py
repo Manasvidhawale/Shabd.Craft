@@ -68,6 +68,9 @@ if ver_a == ver_b:
 
 va_data = db.get_prompt_version(ver_a)
 vb_data = db.get_prompt_version(ver_b)
+if not va_data or not vb_data:
+    st.error("Selected prompt version could not be found.")
+    st.stop()
 
 st.divider()
 
