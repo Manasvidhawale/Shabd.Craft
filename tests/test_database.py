@@ -12,6 +12,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 
 import pytest
 from src.database import Database
+from src.experiment_service import duplicate_experiment
 from src.schemas import (
     Experiment, PromptVersion, TestCase, EvaluationResult,
     PromptTemplate, TaskCategory, PromptingTechnique, OutputFormat,
@@ -76,6 +77,75 @@ class TestPromptVersions:
 
         db.save_prompt_version(PromptVersion(experiment_id=exp_id, user_prompt_template="v1"))
         assert db.get_next_version_number(exp_id) == 2
+
+    def test_first_revision_creates_main_branch(self, db):
+        exp = Experiment(name="Branch Start")
+        db.create_experiment(exp)
+        version = PromptVersion(experiment_id=exp.id, user_prompt_template="first")
+        db.save_prompt_version(version)
+        branches = db.get_prompt_branches(exp.id)
+        assert len(branches) == 1
+        assert branches[0]["name"] == "main"
+        assert branches[0]["head_version_id"] == version.id
+        assert db.get_prompt_version(version.id)["branch_id"] == branches[0]["id"]
+
+    def test_branch_forks_and_advances_without_moving_source(self, db):
+        exp = Experiment(name="Named Branches")
+        db.create_experiment(exp)
+        root = PromptVersion(experiment_id=exp.id, user_prompt_template="root")
+        db.save_prompt_version(root)
+        main = db.get_prompt_branches(exp.id)[0]
+
+        feature_id = db.create_prompt_branch(exp.id, "short-answer", root.id, "Try concise replies")
+        feature_revision = PromptVersion(
+            experiment_id=exp.id, branch_id=feature_id, version_number=2,
+            parent_version_id=root.id, version_label="Concise",
+            user_prompt_template="Answer in one sentence.",
+        )
+        db.save_prompt_version(feature_revision)
+
+        assert db.get_prompt_branch(main["id"])["head_version_id"] == root.id
+        assert db.get_prompt_branch(feature_id)["head_version_id"] == feature_revision.id
+        assert [v["id"] for v in db.get_prompt_branch_history(feature_id)] == [root.id, feature_revision.id]
+
+    def test_branch_names_are_unique_case_insensitively(self, db):
+        exp = Experiment(name="Unique Branch Names")
+        db.create_experiment(exp)
+        root = PromptVersion(experiment_id=exp.id, user_prompt_template="root")
+        db.save_prompt_version(root)
+        db.create_prompt_branch(exp.id, "Review", root.id)
+        with pytest.raises(ValueError, match="already exists"):
+            db.create_prompt_branch(exp.id, "review", root.id)
+
+    def test_branch_requires_latest_revision_as_parent(self, db):
+        exp = Experiment(name="Stale Branch Head")
+        db.create_experiment(exp)
+        root = PromptVersion(experiment_id=exp.id, user_prompt_template="root")
+        db.save_prompt_version(root)
+        main = db.get_prompt_branches(exp.id)[0]
+        latest = PromptVersion(
+            experiment_id=exp.id, branch_id=main["id"], version_number=2,
+            parent_version_id=root.id, user_prompt_template="latest",
+        )
+        db.save_prompt_version(latest)
+        with pytest.raises(ValueError, match="branch has moved"):
+            db.save_prompt_version(PromptVersion(
+                experiment_id=exp.id, branch_id=main["id"], version_number=3,
+                parent_version_id=root.id, user_prompt_template="stale change",
+            ))
+
+    def test_remove_branch_keeps_revisions_and_protects_main(self, db):
+        exp = Experiment(name="Remove Branch")
+        db.create_experiment(exp)
+        root = PromptVersion(experiment_id=exp.id, user_prompt_template="root")
+        db.save_prompt_version(root)
+        main = db.get_prompt_branches(exp.id)[0]
+        with pytest.raises(ValueError, match="main branch cannot be deleted"):
+            db.delete_prompt_branch(main["id"])
+        other = db.create_prompt_branch(exp.id, "try-style", root.id)
+        db.delete_prompt_branch(other)
+        assert db.get_prompt_branch(other) is None
+        assert db.get_prompt_version(root.id) is not None
 
 
 class TestTestCases:
@@ -232,9 +302,13 @@ class TestVersionDeletionAndMeta:
     def test_existing_database_receives_additive_migrations(self, tmp_path):
         path = tmp_path / "legacy.db"
         with sqlite3.connect(path) as conn:
-            conn.execute("CREATE TABLE prompt_versions (id TEXT PRIMARY KEY, experiment_id TEXT, version_number INTEGER)")
+            conn.execute("CREATE TABLE experiments (id TEXT PRIMARY KEY)")
+            conn.execute("INSERT INTO experiments (id) VALUES ('legacy-exp')")
+            conn.execute("CREATE TABLE prompt_versions (id TEXT PRIMARY KEY, experiment_id TEXT, version_number INTEGER, version_label TEXT, created_at TEXT)")
+            conn.execute("INSERT INTO prompt_versions VALUES ('legacy-v1', 'legacy-exp', 1, 'Original', '2026-01-01')")
+            conn.execute("INSERT INTO prompt_versions VALUES ('legacy-v2', 'legacy-exp', 2, 'Revision', '2026-01-02')")
             conn.execute("CREATE TABLE evaluation_results (id TEXT PRIMARY KEY, test_case_id TEXT, prompt_version_id TEXT, experiment_id TEXT)")
-        Database(str(path))
+        migrated_db = Database(str(path))
         with sqlite3.connect(path) as conn:
             version_columns = {row[1] for row in conn.execute("PRAGMA table_info(prompt_versions)")}
             result_columns = {row[1] for row in conn.execute("PRAGMA table_info(evaluation_results)")}
@@ -242,6 +316,11 @@ class TestVersionDeletionAndMeta:
         assert "parent_version_id" in version_columns
         assert {"evaluation_run_id", "input_data_snapshot", "expected_output_snapshot"} <= result_columns
         assert "evaluation_runs" in tables
+        branch = migrated_db.get_prompt_branches("legacy-exp")[0]
+        assert branch["name"] == "main"
+        history = migrated_db.get_prompt_branch_history(branch["id"])
+        assert [v["id"] for v in history] == ["legacy-v1", "legacy-v2"]
+        assert history[1]["parent_version_id"] == "legacy-v1"
 
     def test_delete_prompt_version_cleans_dependencies(self, db):
         exp = Experiment(name="Ver Delete Exp")
@@ -303,6 +382,36 @@ class TestVersionDeletionAndMeta:
                 experiment_id=second_exp.id, parent_version_id=parent.id,
                 user_prompt_template="invalid child",
             ))
+
+    def test_duplicate_experiment_preserves_named_branches(self, db):
+        exp = Experiment(name="Original branches")
+        db.create_experiment(exp)
+        root = PromptVersion(experiment_id=exp.id, user_prompt_template="root")
+        db.save_prompt_version(root)
+        main = db.get_prompt_branches(exp.id)[0]
+        main_revision = PromptVersion(
+            experiment_id=exp.id, branch_id=main["id"], version_number=2,
+            parent_version_id=root.id, user_prompt_template="main change",
+        )
+        db.save_prompt_version(main_revision)
+        variant_id = db.create_prompt_branch(exp.id, "variant", root.id)
+        variant_revision = PromptVersion(
+            experiment_id=exp.id, branch_id=variant_id, version_number=3,
+            parent_version_id=root.id, user_prompt_template="variant change",
+        )
+        db.save_prompt_version(variant_revision)
+        db.save_test_case(TestCase(input_data="case", metadata={"kind": "sample"}), exp.id)
+
+        duplicate_id = duplicate_experiment(db, exp.id, "Copied branches")
+        copied_branches = {branch["name"]: branch for branch in db.get_prompt_branches(duplicate_id)}
+        assert set(copied_branches) == {"main", "variant"}
+        main_history = db.get_prompt_branch_history(copied_branches["main"]["id"])
+        variant_history = db.get_prompt_branch_history(copied_branches["variant"]["id"])
+        assert len(main_history) == 2
+        assert len(variant_history) == 2
+        assert main_history[0]["id"] == variant_history[0]["id"]
+        assert main_history[0]["id"] != root.id
+        assert db.get_test_cases(duplicate_id)[0]["metadata"] == '{"kind": "sample"}'
 
     def test_evaluation_run_keeps_case_snapshot_and_settings_signature(self, db):
         exp = Experiment(name="Run Snapshot")

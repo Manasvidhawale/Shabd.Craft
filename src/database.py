@@ -15,7 +15,7 @@ from pathlib import Path
 from typing import Any, Optional
 
 from src.schemas import (
-    Experiment, PromptVersion, TestCase, EvaluationResult,
+    Experiment, PromptVersion, PromptBranch, TestCase, EvaluationResult,
     PromptTemplate, OptimizationCandidate, ExecutionStatus,
     TaskCategory, _new_id, _now,
 )
@@ -61,6 +61,7 @@ class Database:
                 CREATE TABLE IF NOT EXISTS prompt_versions (
                     id TEXT PRIMARY KEY,
                     experiment_id TEXT NOT NULL,
+                    branch_id TEXT,
                     version_number INTEGER DEFAULT 1,
                     parent_version_id TEXT,
                     version_label TEXT DEFAULT 'Original',
@@ -77,6 +78,21 @@ class Database:
                     optimization_strategy TEXT DEFAULT '',
                     created_at TEXT NOT NULL,
                     FOREIGN KEY (experiment_id) REFERENCES experiments(id)
+                );
+
+                CREATE TABLE IF NOT EXISTS prompt_branches (
+                    id TEXT PRIMARY KEY,
+                    experiment_id TEXT NOT NULL,
+                    name TEXT NOT NULL COLLATE NOCASE,
+                    head_version_id TEXT NOT NULL,
+                    base_version_id TEXT NOT NULL,
+                    description TEXT DEFAULT '',
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL,
+                    UNIQUE (experiment_id, name),
+                    FOREIGN KEY (experiment_id) REFERENCES experiments(id),
+                    FOREIGN KEY (head_version_id) REFERENCES prompt_versions(id),
+                    FOREIGN KEY (base_version_id) REFERENCES prompt_versions(id)
                 );
 
                 CREATE TABLE IF NOT EXISTS evaluation_runs (
@@ -181,6 +197,7 @@ class Database:
             """)
             # Additive migrations keep existing local workspaces readable.
             for table, column, definition in (
+                ("prompt_versions", "branch_id", "TEXT"),
                 ("prompt_versions", "parent_version_id", "TEXT"),
                 ("evaluation_results", "evaluation_run_id", "TEXT"),
                 ("evaluation_results", "input_data_snapshot", "TEXT DEFAULT ''"),
@@ -189,6 +206,40 @@ class Database:
                 columns = {row["name"] for row in conn.execute(f"PRAGMA table_info({table})")}
                 if column not in columns:
                     conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {definition}")
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_pv_branch ON prompt_versions(branch_id)")
+
+            # Give pre-branch experiments a main branch while preserving their existing revisions.
+            experiments = conn.execute("SELECT id FROM experiments").fetchall()
+            for experiment in experiments:
+                exp_id = experiment["id"]
+                has_branch = conn.execute(
+                    "SELECT 1 FROM prompt_branches WHERE experiment_id = ? LIMIT 1", (exp_id,)
+                ).fetchone()
+                if has_branch:
+                    continue
+                revisions = conn.execute(
+                    "SELECT id, parent_version_id FROM prompt_versions WHERE experiment_id = ? "
+                    "ORDER BY version_number, created_at, rowid", (exp_id,)
+                ).fetchall()
+                if not revisions:
+                    continue
+                # Pre-branch versions were numbered linearly but had no parent links.
+                for index, revision in enumerate(revisions):
+                    if index and not revision["parent_version_id"]:
+                        conn.execute(
+                            "UPDATE prompt_versions SET parent_version_id = ? WHERE id = ?",
+                            (revisions[index - 1]["id"], revision["id"]),
+                        )
+                base_id = revisions[0]["id"]
+                head_id = revisions[-1]["id"]
+                branch_id = _new_id()
+                now = _now()
+                conn.execute(
+                    "INSERT INTO prompt_branches (id, experiment_id, name, head_version_id, base_version_id, description, created_at, updated_at) "
+                    "VALUES (?, ?, 'main', ?, ?, 'Default branch created during migration', ?, ?)",
+                    (branch_id, exp_id, head_id, base_id, now, now),
+                )
+                conn.execute("UPDATE prompt_versions SET branch_id = ? WHERE experiment_id = ?", (branch_id, exp_id))
 
     # ── Experiments ────────────────────────────────────────────────────
 
@@ -227,34 +278,150 @@ class Database:
             conn.execute("DELETE FROM evaluation_results WHERE experiment_id = ?", (exp_id,))
             conn.execute("DELETE FROM optimization_candidates WHERE experiment_id = ?", (exp_id,))
             conn.execute("DELETE FROM test_cases WHERE experiment_id = ?", (exp_id,))
+            conn.execute("DELETE FROM prompt_branches WHERE experiment_id = ?", (exp_id,))
             conn.execute("DELETE FROM prompt_versions WHERE experiment_id = ?", (exp_id,))
             conn.execute("DELETE FROM experiments WHERE id = ?", (exp_id,))
+
+    # ── Prompt Branches ─────────────────────────────────────────────────
+
+    def create_prompt_branch(
+        self, experiment_id: str, name: str, source_version_id: str,
+        description: str = "",
+    ) -> str:
+        """Create a named branch whose initial head is an existing revision."""
+        branch_name = name.strip()
+        if not branch_name or len(branch_name) > 60:
+            raise ValueError("Branch names must contain 1 to 60 characters.")
+        branch = PromptBranch(
+            experiment_id=experiment_id,
+            name=branch_name,
+            head_version_id=source_version_id,
+            base_version_id=source_version_id,
+            description=description.strip(),
+        )
+        with self._connect() as conn:
+            source = conn.execute(
+                "SELECT experiment_id FROM prompt_versions WHERE id = ?", (source_version_id,)
+            ).fetchone()
+            if not source or source["experiment_id"] != experiment_id:
+                raise ValueError("Choose a revision from this experiment as the branch starting point.")
+            try:
+                conn.execute(
+                    "INSERT INTO prompt_branches (id, experiment_id, name, head_version_id, base_version_id, description, created_at, updated_at) "
+                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                    (branch.id, branch.experiment_id, branch.name, branch.head_version_id,
+                     branch.base_version_id, branch.description, branch.created_at, branch.updated_at),
+                )
+            except sqlite3.IntegrityError as exc:
+                if "prompt_branches.experiment_id, prompt_branches.name" in str(exc):
+                    raise ValueError(f"A branch named '{branch_name}' already exists in this experiment.") from exc
+                raise
+        return branch.id
+
+    def get_prompt_branches(self, experiment_id: str) -> list[dict]:
+        with self._connect() as conn:
+            rows = conn.execute(
+                "SELECT b.*, pv.version_number AS head_version_number, pv.version_label AS head_version_label "
+                "FROM prompt_branches b LEFT JOIN prompt_versions pv ON pv.id = b.head_version_id "
+                "WHERE b.experiment_id = ? ORDER BY CASE WHEN b.name = 'main' COLLATE NOCASE THEN 0 ELSE 1 END, b.name COLLATE NOCASE",
+                (experiment_id,),
+            ).fetchall()
+            return [dict(row) for row in rows]
+
+    def get_prompt_branch(self, branch_id: str) -> Optional[dict]:
+        with self._connect() as conn:
+            row = conn.execute(
+                "SELECT b.*, pv.version_number AS head_version_number, pv.version_label AS head_version_label "
+                "FROM prompt_branches b LEFT JOIN prompt_versions pv ON pv.id = b.head_version_id "
+                "WHERE b.id = ?", (branch_id,),
+            ).fetchone()
+            return dict(row) if row else None
+
+    def get_prompt_branch_history(self, branch_id: str) -> list[dict]:
+        """Return revisions from the branch's starting point through its head."""
+        branch = self.get_prompt_branch(branch_id)
+        if not branch:
+            return []
+        by_id = {v["id"]: v for v in self.get_prompt_versions(branch["experiment_id"])}
+        history = []
+        current_id = branch["head_version_id"]
+        visited = set()
+        while current_id and current_id in by_id and current_id not in visited:
+            visited.add(current_id)
+            version = by_id[current_id]
+            history.append(version)
+            if current_id == branch["base_version_id"]:
+                break
+            current_id = version.get("parent_version_id")
+        return list(reversed(history))
+
+    def delete_prompt_branch(self, branch_id: str):
+        """Remove a non-main branch pointer while keeping its immutable revisions."""
+        with self._connect() as conn:
+            branch = conn.execute("SELECT * FROM prompt_branches WHERE id = ?", (branch_id,)).fetchone()
+            if not branch:
+                return
+            if branch["name"].lower() == "main":
+                raise ValueError("The main branch cannot be deleted.")
+            conn.execute("UPDATE prompt_versions SET branch_id = NULL WHERE branch_id = ?", (branch_id,))
+            conn.execute("DELETE FROM prompt_branches WHERE id = ?", (branch_id,))
 
     # ── Prompt Versions ────────────────────────────────────────────────
 
     def save_prompt_version(self, pv: PromptVersion) -> str:
         with self._connect() as conn:
+            parent_row = None
+            if pv.parent_version_id:
+                parent_row = conn.execute(
+                    "SELECT experiment_id, branch_id FROM prompt_versions WHERE id = ?",
+                    (pv.parent_version_id,),
+                ).fetchone()
+                if not parent_row or parent_row["experiment_id"] != pv.experiment_id:
+                    raise ValueError("A revision parent must be an existing version in the same experiment.")
+            branch = None
+            new_main_branch = False
+            if pv.branch_id:
+                branch = conn.execute(
+                    "SELECT * FROM prompt_branches WHERE id = ?", (pv.branch_id,)
+                ).fetchone()
+                if not branch or branch["experiment_id"] != pv.experiment_id:
+                    raise ValueError("Choose a branch from this experiment before saving a revision.")
+            else:
+                if parent_row:
+                    pv.branch_id = parent_row["branch_id"]
+                if pv.branch_id:
+                    branch = conn.execute(
+                        "SELECT * FROM prompt_branches WHERE id = ?", (pv.branch_id,)
+                    ).fetchone()
+                if not branch:
+                    branch = conn.execute(
+                        "SELECT * FROM prompt_branches WHERE experiment_id = ? AND name = 'main' COLLATE NOCASE",
+                        (pv.experiment_id,),
+                    ).fetchone()
+                if not branch:
+                    pv.branch_id = _new_id()
+                    new_main_branch = True
+                else:
+                    pv.branch_id = branch["id"]
+                    if pv.parent_version_id is None and branch["head_version_id"]:
+                        pv.parent_version_id = branch["head_version_id"]
+
+            if branch and pv.parent_version_id != branch["head_version_id"]:
+                raise ValueError("This branch has moved. Open its latest revision before saving a new one.")
             duplicate = conn.execute(
                 "SELECT 1 FROM prompt_versions WHERE experiment_id = ? AND version_number = ?",
                 (pv.experiment_id, pv.version_number),
             ).fetchone()
             if duplicate:
                 raise ValueError(f"Version number {pv.version_number} already exists in this experiment.")
-            if pv.parent_version_id:
-                parent = conn.execute(
-                    "SELECT experiment_id FROM prompt_versions WHERE id = ?",
-                    (pv.parent_version_id,),
-                ).fetchone()
-                if not parent or parent["experiment_id"] != pv.experiment_id:
-                    raise ValueError("A revision parent must be an existing version in the same experiment.")
             conn.execute(
                 "INSERT INTO prompt_versions "
-                "(id, experiment_id, version_number, parent_version_id, version_label, system_prompt, "
+                "(id, experiment_id, branch_id, version_number, parent_version_id, version_label, system_prompt, "
                 "user_prompt_template, technique, few_shot_examples, output_format, "
                 "variables, model_name, temperature, max_tokens, is_optimized, "
                 "optimization_strategy, created_at) "
-                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-                (pv.id, pv.experiment_id, pv.version_number, pv.parent_version_id, pv.version_label,
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                (pv.id, pv.experiment_id, pv.branch_id, pv.version_number, pv.parent_version_id, pv.version_label,
                  pv.system_prompt, pv.user_prompt_template, pv.technique.value,
                  json.dumps([e.model_dump() for e in pv.few_shot_examples]),
                  pv.output_format.value, json.dumps(pv.variables),
@@ -262,6 +429,18 @@ class Database:
                  1 if pv.is_optimized else 0, pv.optimization_strategy,
                  pv.created_at),
             )
+            now = _now()
+            if new_main_branch:
+                conn.execute(
+                    "INSERT INTO prompt_branches (id, experiment_id, name, head_version_id, base_version_id, description, created_at, updated_at) "
+                    "VALUES (?, ?, 'main', ?, ?, '', ?, ?)",
+                    (pv.branch_id, pv.experiment_id, pv.id, pv.id, now, now),
+                )
+            else:
+                conn.execute(
+                    "UPDATE prompt_branches SET head_version_id = ?, updated_at = ? WHERE id = ?",
+                    (pv.id, now, pv.branch_id),
+                )
         return pv.id
 
     def get_prompt_versions(self, experiment_id: str) -> list[dict]:
@@ -271,6 +450,43 @@ class Database:
                 (experiment_id,),
             ).fetchall()
             return [dict(r) for r in rows]
+
+    def duplicate_prompt_history(self, source_experiment_id: str, target_experiment_id: str):
+        """Copy revisions and named branch pointers into a duplicated experiment."""
+        with self._connect() as conn:
+            versions = conn.execute(
+                "SELECT * FROM prompt_versions WHERE experiment_id = ? ORDER BY version_number, created_at",
+                (source_experiment_id,),
+            ).fetchall()
+            branches = conn.execute(
+                "SELECT * FROM prompt_branches WHERE experiment_id = ? ORDER BY name COLLATE NOCASE",
+                (source_experiment_id,),
+            ).fetchall()
+            version_ids = {row["id"]: _new_id() for row in versions}
+            branch_ids = {row["id"]: _new_id() for row in branches}
+            for row in versions:
+                conn.execute(
+                    "INSERT INTO prompt_versions "
+                    "(id, experiment_id, branch_id, version_number, parent_version_id, version_label, system_prompt, "
+                    "user_prompt_template, technique, few_shot_examples, output_format, variables, model_name, "
+                    "temperature, max_tokens, is_optimized, optimization_strategy, created_at) "
+                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                    (version_ids[row["id"]], target_experiment_id,
+                     branch_ids.get(row["branch_id"]), row["version_number"],
+                     version_ids.get(row["parent_version_id"]), row["version_label"],
+                     row["system_prompt"], row["user_prompt_template"], row["technique"],
+                     row["few_shot_examples"], row["output_format"], row["variables"],
+                     row["model_name"], row["temperature"], row["max_tokens"],
+                     row["is_optimized"], row["optimization_strategy"], row["created_at"]),
+                )
+            for row in branches:
+                conn.execute(
+                    "INSERT INTO prompt_branches (id, experiment_id, name, head_version_id, base_version_id, description, created_at, updated_at) "
+                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                    (branch_ids[row["id"]], target_experiment_id, row["name"],
+                     version_ids[row["head_version_id"]], version_ids[row["base_version_id"]],
+                     row["description"], row["created_at"], row["updated_at"]),
+                )
 
     def get_prompt_version(self, version_id: str) -> Optional[dict]:
         with self._connect() as conn:
@@ -291,15 +507,42 @@ class Database:
 
     def delete_prompt_version(self, version_id: str):
         with self._connect() as conn:
+            version = conn.execute(
+                "SELECT experiment_id, parent_version_id FROM prompt_versions WHERE id = ?", (version_id,)
+            ).fetchone()
+            if not version:
+                return
+            child = conn.execute(
+                "SELECT 1 FROM prompt_versions WHERE parent_version_id = ? LIMIT 1", (version_id,)
+            ).fetchone()
+            if child:
+                raise ValueError("This revision has child revisions and cannot be deleted.")
+            branch_refs = conn.execute(
+                "SELECT * FROM prompt_branches WHERE head_version_id = ? OR base_version_id = ?",
+                (version_id, version_id),
+            ).fetchall()
+            parent_id = version["parent_version_id"]
+            for branch in branch_refs:
+                if branch["base_version_id"] == version_id and branch["head_version_id"] != version_id:
+                    raise ValueError("This revision is the starting point for a branch and cannot be deleted.")
+                if branch["head_version_id"] == version_id:
+                    if not parent_id:
+                        if branch["name"].lower() == "main" and branch["base_version_id"] == version_id:
+                            conn.execute("DELETE FROM prompt_branches WHERE id = ?", (branch["id"],))
+                            continue
+                        raise ValueError("This revision is a branch starting point. Delete that branch first.")
+                    new_base = parent_id if branch["base_version_id"] == version_id else branch["base_version_id"]
+                    conn.execute(
+                        "UPDATE prompt_branches SET head_version_id = ?, base_version_id = ?, updated_at = ? WHERE id = ?",
+                        (parent_id, new_base, _now(), branch["id"]),
+                    )
             conn.execute("DELETE FROM evaluation_runs WHERE prompt_version_id = ?", (version_id,))
-            version = conn.execute("SELECT experiment_id FROM prompt_versions WHERE id = ?", (version_id,)).fetchone()
-            if version:
-                exp_id = version["experiment_id"]
-                max_row = conn.execute("SELECT MAX(version_number) AS mx FROM prompt_versions WHERE experiment_id = ?", (exp_id,)).fetchone()
-                counter_key = f"version_counter:{exp_id}"
-                counter = conn.execute("SELECT value FROM app_meta WHERE key = ?", (counter_key,)).fetchone()
-                next_number = max((max_row["mx"] or 0) + 1, int(counter["value"]) if counter else 1)
-                conn.execute("INSERT OR REPLACE INTO app_meta (key, value) VALUES (?, ?)", (counter_key, str(next_number)))
+            exp_id = version["experiment_id"]
+            max_row = conn.execute("SELECT MAX(version_number) AS mx FROM prompt_versions WHERE experiment_id = ?", (exp_id,)).fetchone()
+            counter_key = f"version_counter:{exp_id}"
+            counter = conn.execute("SELECT value FROM app_meta WHERE key = ?", (counter_key,)).fetchone()
+            next_number = max((max_row["mx"] or 0) + 1, int(counter["value"]) if counter else 1)
+            conn.execute("INSERT OR REPLACE INTO app_meta (key, value) VALUES (?, ?)", (counter_key, str(next_number)))
             conn.execute("DELETE FROM evaluation_results WHERE prompt_version_id = ?", (version_id,))
             conn.execute("DELETE FROM optimization_candidates WHERE original_version_id = ?", (version_id,))
             conn.execute("DELETE FROM prompt_versions WHERE id = ?", (version_id,))
@@ -600,6 +843,7 @@ class Database:
             conn.execute("DELETE FROM evaluation_results")
             conn.execute("DELETE FROM optimization_candidates")
             conn.execute("DELETE FROM test_cases")
+            conn.execute("DELETE FROM prompt_branches")
             conn.execute("DELETE FROM prompt_versions")
             conn.execute("DELETE FROM experiments")
 
