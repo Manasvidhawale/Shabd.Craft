@@ -25,7 +25,7 @@ def export_results_csv(results: list[dict], test_cases: list[dict] | None = None
     writer = csv.writer(output)
 
     headers = [
-        "test_case_id", "input_data", "expected_output", "generated_output",
+        "evaluation_run_id", "test_case_id", "input_data", "expected_output", "generated_output",
         "overall_score", "execution_status", "evaluation_method",
         "accuracy", "relevance", "instruction_adherence", "clarity",
         "format_compliance", "latency_ms", "tokens_used", "is_demo",
@@ -36,9 +36,10 @@ def export_results_csv(results: list[dict], test_cases: list[dict] | None = None
         tc = tc_map.get(r.get("test_case_id", ""), {})
         scores = _parse_criterion_scores(r.get("criterion_scores", "[]"))
         writer.writerow([
+            r.get("evaluation_run_id", ""),
             r.get("test_case_id", ""),
-            tc.get("input_data", ""),
-            tc.get("expected_output", ""),
+            tc.get("input_data", "") or r.get("input_data_snapshot", ""),
+            tc.get("expected_output", "") or r.get("expected_output_snapshot", ""),
             r.get("generated_output", ""),
             r.get("overall_score", 0),
             r.get("execution_status", ""),
@@ -61,6 +62,7 @@ def export_results_json(
     versions: list[dict],
     test_cases: list[dict],
     results: list[dict],
+    evaluation_runs: list[dict] | None = None,
 ) -> str:
     """Export complete experiment data as JSON."""
     data = {
@@ -68,6 +70,7 @@ def export_results_json(
         "versions": [_clean_for_export(v) for v in versions],
         "test_cases": [_clean_for_export(tc) for tc in test_cases],
         "evaluation_results": [_clean_for_export(r) for r in results],
+        "evaluation_runs": [_clean_for_export(run) for run in (evaluation_runs or [])],
     }
     return json.dumps(data, indent=2, default=str)
 

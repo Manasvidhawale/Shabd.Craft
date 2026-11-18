@@ -317,12 +317,21 @@ with tab_side:
             st.code(vb_data["user_prompt_template"], language="text")
 
 # Results comparison
-results_a = db.get_evaluation_results(sel_exp, ver_a)
-results_b = db.get_evaluation_results(sel_exp, ver_b)
-
-if not results_a and not results_b:
-    st.info(":material/info: No evaluation results available for these versions. Run evaluations in the Evaluation Lab first.")
+run_pairs = db.get_comparable_evaluation_run_pairs(sel_exp, ver_a, ver_b)
+if not run_pairs:
+    st.info("No matching completed evaluation runs exist for these versions. Run both versions with the same test cases, evaluation method, weights, and constraints to compare them fairly.")
     st.stop()
+
+def _run_pair_label(pair_index):
+    pair = run_pairs[pair_index]
+    a, b = pair
+    return f"Matched run pair · {a['method']} · {a['created_at'][:19]} / {b['created_at'][:19]}"
+
+chosen_pair_index = st.selectbox("Comparable evaluation runs", list(range(len(run_pairs))), format_func=_run_pair_label, key="compare_run_pair")
+chosen_pair = run_pairs[chosen_pair_index]
+results_a = db.get_evaluation_results(sel_exp, evaluation_run_id=chosen_pair[0]["id"])
+results_b = db.get_evaluation_results(sel_exp, evaluation_run_id=chosen_pair[1]["id"])
+st.caption("These runs share the same evaluation settings and a snapshot of the same test suite.")
 
 comparison = compare_versions(va_data, vb_data, results_a, results_b)
 

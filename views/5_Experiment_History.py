@@ -108,11 +108,17 @@ for exp in filtered:
         if versions:
             st.divider()
             st.markdown("**Prompt Versions & Lineage:**")
+            version_by_id = {item["id"]: item for item in versions}
             for v in versions:
                 opt_tag = " · :material/star: :green[Optimized]" if v.get("is_optimized") else ""
+                parent = version_by_id.get(v.get("parent_version_id"))
+                parent_tag = (
+                    f" · from v{parent['version_number']}" if parent
+                    else (" · parent revision deleted" if v.get("parent_version_id") else " · root revision")
+                )
                 vc1, vc2, vc3 = st.columns([4, 1, 1])
                 with vc1:
-                    st.markdown(f"**v{v['version_number']}:** {v['version_label']}{opt_tag}")
+                    st.markdown(f"**v{v['version_number']}:** {v['version_label']}{parent_tag}{opt_tag}")
                 with vc2:
                     if st.button(":material/edit_note: Open", key=f"hist_open_v_{v['id']}", use_container_width=True):
                         load_version_into_workshop(db, exp, v)
@@ -144,7 +150,9 @@ for exp in filtered:
             results = summary.get("results", [])
             test_cases = summary.get("test_cases", [])
             if results:
-                json_export = export_results_json(exp, versions, test_cases, results)
+                json_export = export_results_json(
+                    exp, versions, test_cases, results, summary.get("evaluation_runs", [])
+                )
                 st.download_button(
                     ":material/download: Export JSON",
                     json_export,

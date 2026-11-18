@@ -519,16 +519,14 @@ with st.container(border=True):
             value=db.get_prompt_version(editing_ver_id).get("version_label", "Updated") if db.get_prompt_version(editing_ver_id) else "Updated",
             key="ws_ver_label_input",
         )
-        b1, b2, b3, b4, b5 = st.columns([2, 1.5, 1.5, 1.5, 1])
+        b1, b2, b3, b4 = st.columns([2, 1.5, 1.5, 1])
         with b1:
             run_clicked = st.button(":material/play_arrow: Run Prompt", type="primary", use_container_width=True)
         with b2:
-            update_clicked = st.button(":material/save: Save Changes", use_container_width=True)
+            save_revision_clicked = st.button(":material/save: Save as New Version", use_container_width=True)
         with b3:
-            new_ver_clicked = st.button(":material/add_circle: New Version", use_container_width=True)
-        with b4:
             eval_clicked = st.button(":material/biotech: Evaluate", use_container_width=True)
-        with b5:
+        with b4:
             delete_clicked = st.button(":material/delete: Delete", use_container_width=True)
         save_new_clicked = False
         reset_clicked = False
@@ -542,8 +540,7 @@ with st.container(border=True):
             eval_clicked = st.button(":material/biotech: Send to Evaluation", use_container_width=True)
         with b4:
             reset_clicked = st.button(":material/restart_alt: Clear Form", use_container_width=True)
-        update_clicked = False
-        new_ver_clicked = False
+        save_revision_clicked = False
         delete_clicked = False
         ver_label_val = "Initial"
 
@@ -636,26 +633,7 @@ if save_new_clicked:
         st.toast(f"Prompt '{name}' saved.", icon=":material/save:")
         st.rerun()
 
-if update_clicked and editing_exp_id and editing_ver_id:
-    if not user_prompt_val:
-        st.error("Please enter a user prompt template.")
-    else:
-        db.update_prompt_version(
-            version_id=editing_ver_id,
-            version_label=(ver_label_val or "Original").strip(),
-            system_prompt=sys_prompt_val,
-            user_prompt_template=user_prompt_val,
-            technique=tech_val,
-            output_format=fmt_val,
-            model_name=model_val,
-            temperature=temp_val,
-            max_tokens=max_tok_val,
-            few_shot_examples=_collect_few_shots(),
-            variables=extract_variables(user_prompt_val),
-        )
-        st.toast("Prompt version updated.", icon=":material/save:")
-
-if new_ver_clicked and editing_exp_id:
+if save_revision_clicked and editing_exp_id and editing_ver_id:
     if not user_prompt_val:
         st.error("Please enter a user prompt template.")
     else:
@@ -666,6 +644,7 @@ if new_ver_clicked and editing_exp_id:
         new_pv = PromptVersion(
             experiment_id=editing_exp_id,
             version_number=next_num,
+            parent_version_id=editing_ver_id,
             version_label=label,
             system_prompt=sys_prompt_val,
             user_prompt_template=user_prompt_val,

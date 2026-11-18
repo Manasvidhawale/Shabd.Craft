@@ -4,6 +4,8 @@ Shabd.Craft — Tests: Database
 
 import sys
 import os
+import json
+import sqlite3
 import tempfile
 from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent.parent))
@@ -227,6 +229,20 @@ class TestPromptLibrary:
 
 
 class TestVersionDeletionAndMeta:
+    def test_existing_database_receives_additive_migrations(self, tmp_path):
+        path = tmp_path / "legacy.db"
+        with sqlite3.connect(path) as conn:
+            conn.execute("CREATE TABLE prompt_versions (id TEXT PRIMARY KEY, experiment_id TEXT, version_number INTEGER)")
+            conn.execute("CREATE TABLE evaluation_results (id TEXT PRIMARY KEY, test_case_id TEXT, prompt_version_id TEXT, experiment_id TEXT)")
+        Database(str(path))
+        with sqlite3.connect(path) as conn:
+            version_columns = {row[1] for row in conn.execute("PRAGMA table_info(prompt_versions)")}
+            result_columns = {row[1] for row in conn.execute("PRAGMA table_info(evaluation_results)")}
+            tables = {row[0] for row in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+        assert "parent_version_id" in version_columns
+        assert {"evaluation_run_id", "input_data_snapshot", "expected_output_snapshot"} <= result_columns
+        assert "evaluation_runs" in tables
+
     def test_delete_prompt_version_cleans_dependencies(self, db):
         exp = Experiment(name="Ver Delete Exp")
         db.create_experiment(exp)
@@ -236,26 +252,118 @@ class TestVersionDeletionAndMeta:
         assert db.get_prompt_version(pv.id) is None
         assert db.get_prompt_versions(exp.id) == []
 
-    def test_update_prompt_version(self, db):
+    def test_prompt_versions_are_immutable(self, db):
         exp = Experiment(name="Ver Update Exp")
         db.create_experiment(exp)
         pv = PromptVersion(experiment_id=exp.id, version_number=1, user_prompt_template="old")
         db.save_prompt_version(pv)
-        db.update_prompt_version(
-            version_id=pv.id,
-            version_label="Edited",
-            system_prompt="sys",
-            user_prompt_template="new {{x}}",
-            technique="zero_shot",
-            output_format="text",
-            model_name="gpt-4o",
-            temperature=0.4,
-            max_tokens=512,
-            variables=["x"],
-        )
+        with pytest.raises(ValueError, match="immutable"):
+            db.update_prompt_version(
+                version_id=pv.id,
+                version_label="Edited",
+                system_prompt="sys",
+                user_prompt_template="new {{x}}",
+                technique="zero_shot",
+                output_format="text",
+                model_name="gpt-4o",
+                temperature=0.4,
+                max_tokens=512,
+                variables=["x"],
+            )
         updated = db.get_prompt_version(pv.id)
-        assert updated["version_label"] == "Edited"
-        assert updated["user_prompt_template"] == "new {{x}}"
+        assert updated["version_label"] == "Original"
+        assert updated["user_prompt_template"] == "old"
+
+    def test_version_numbers_are_not_reused_after_delete(self, db):
+        exp = Experiment(name="Monotonic Versions")
+        db.create_experiment(exp)
+        first = PromptVersion(experiment_id=exp.id, version_number=1, user_prompt_template="v1")
+        db.save_prompt_version(first)
+        second_number = db.get_next_version_number(exp.id)
+        second = PromptVersion(experiment_id=exp.id, version_number=second_number, user_prompt_template="v2")
+        db.save_prompt_version(second)
+        db.delete_prompt_version(second.id)
+        assert db.get_next_version_number(exp.id) == 3
+
+    def test_revision_parent_must_be_in_same_experiment(self, db):
+        first_exp = Experiment(name="First lineage")
+        second_exp = Experiment(name="Second lineage")
+        db.create_experiment(first_exp)
+        db.create_experiment(second_exp)
+        parent = PromptVersion(experiment_id=first_exp.id, user_prompt_template="root")
+        db.save_prompt_version(parent)
+        child = PromptVersion(
+            experiment_id=first_exp.id, version_number=2,
+            parent_version_id=parent.id, user_prompt_template="child",
+        )
+        db.save_prompt_version(child)
+        assert db.get_prompt_version(child.id)["parent_version_id"] == parent.id
+        with pytest.raises(ValueError, match="same experiment"):
+            db.save_prompt_version(PromptVersion(
+                experiment_id=second_exp.id, parent_version_id=parent.id,
+                user_prompt_template="invalid child",
+            ))
+
+    def test_evaluation_run_keeps_case_snapshot_and_settings_signature(self, db):
+        exp = Experiment(name="Run Snapshot")
+        db.create_experiment(exp)
+        version = PromptVersion(experiment_id=exp.id, user_prompt_template="{{input}}")
+        db.save_prompt_version(version)
+        case = TestCase(input_data="original input", expected_output="original reference")
+        db.save_test_case(case, exp.id)
+        run_id = db.create_evaluation_run(
+            exp.id, version.id, "rule_based", {"accuracy": 1.0}, {"max_words": 20},
+            [{"id": case.id, "input_data": case.input_data, "expected_output": case.expected_output}],
+        )
+        db.update_test_case(case.id, "edited input", "edited reference")
+        run = db.get_evaluation_runs(exp.id, version.id)[0]
+        assert run["id"] == run_id
+        assert json.loads(run["test_cases_snapshot"])[0]["input_data"] == "original input"
+        changed_run_id = db.create_evaluation_run(
+            exp.id, version.id, "rule_based", {"accuracy": 0.5}, {"max_words": 20},
+            [{"id": case.id, "input_data": "original input", "expected_output": "original reference"}],
+        )
+        other_run = next(r for r in db.get_evaluation_runs(exp.id, version.id) if r["id"] == changed_run_id)
+        assert other_run["signature"] != run["signature"]
+
+    def test_evaluation_result_keeps_input_snapshot(self, db):
+        exp = Experiment(name="Result Snapshot")
+        db.create_experiment(exp)
+        version = PromptVersion(experiment_id=exp.id, user_prompt_template="{{input}}")
+        db.save_prompt_version(version)
+        case = TestCase(input_data="input before edit", expected_output="reference before edit")
+        db.save_test_case(case, exp.id)
+        run_id = db.create_evaluation_run(exp.id, version.id, "rule_based", {}, {}, [case.model_dump()])
+        result = EvaluationResult(
+            test_case_id=case.id, prompt_version_id=version.id, experiment_id=exp.id,
+            evaluation_run_id=run_id, input_data_snapshot=case.input_data,
+            expected_output_snapshot=case.expected_output,
+        )
+        db.save_evaluation_result(result)
+        db.update_test_case(case.id, "input after edit", "reference after edit")
+        stored = db.get_evaluation_results(exp.id, evaluation_run_id=run_id)[0]
+        assert stored["input_data_snapshot"] == "input before edit"
+        assert stored["expected_output_snapshot"] == "reference before edit"
+
+    def test_comparable_runs_require_matching_snapshot_and_settings(self, db):
+        exp = Experiment(name="Comparable Runs")
+        db.create_experiment(exp)
+        version_a = PromptVersion(experiment_id=exp.id, user_prompt_template="A")
+        version_b = PromptVersion(experiment_id=exp.id, version_number=2, user_prompt_template="B")
+        db.save_prompt_version(version_a)
+        db.save_prompt_version(version_b)
+        cases = [{"id": "tc-1", "input_data": "one", "expected_output": "gold"}]
+        run_a = db.create_evaluation_run(exp.id, version_a.id, "rule_based", {"accuracy": 1}, {}, cases)
+        run_b = db.create_evaluation_run(exp.id, version_b.id, "rule_based", {"accuracy": 1}, {}, cases)
+        db.update_evaluation_run_status(run_a, "done")
+        db.update_evaluation_run_status(run_b, "done")
+        pairs = db.get_comparable_evaluation_run_pairs(exp.id, version_a.id, version_b.id)
+        assert [(a["id"], b["id"]) for a, b in pairs] == [(run_a, run_b)]
+
+        incomplete = db.create_evaluation_run(exp.id, version_b.id, "rule_based", {"accuracy": 0.5}, {}, cases)
+        db.update_evaluation_run_status(incomplete, "done")
+        pairs = db.get_comparable_evaluation_run_pairs(exp.id, version_a.id, version_b.id)
+        assert len(pairs) == 1
 
     def test_app_meta_roundtrip(self, db):
         assert db.get_meta("missing", "fallback") == "fallback"

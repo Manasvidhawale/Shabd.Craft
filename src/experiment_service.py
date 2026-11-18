@@ -86,11 +86,13 @@ def duplicate_experiment(db: Database, exp_id: str, new_name: str) -> Optional[s
 
     # Copy versions
     versions = db.get_prompt_versions(exp_id)
+    copied_version_ids: dict[str, str] = {}
     for v in versions:
         examples = json.loads(v.get("few_shot_examples", "[]"))
         pv = PromptVersion(
             experiment_id=new_exp_id,
             version_number=v["version_number"],
+            parent_version_id=copied_version_ids.get(v.get("parent_version_id")),
             version_label=v["version_label"],
             system_prompt=v["system_prompt"],
             user_prompt_template=v["user_prompt_template"],
@@ -101,8 +103,10 @@ def duplicate_experiment(db: Database, exp_id: str, new_name: str) -> Optional[s
             temperature=v["temperature"],
             max_tokens=v["max_tokens"],
             few_shot_examples=[FewShotExample(**e) for e in examples],
+            is_optimized=bool(v.get("is_optimized", False)),
+            optimization_strategy=v.get("optimization_strategy", ""),
         )
-        db.save_prompt_version(pv)
+        copied_version_ids[v["id"]] = db.save_prompt_version(pv)
 
     # Copy test cases
     test_cases = db.get_test_cases(exp_id)
@@ -125,6 +129,7 @@ def get_experiment_summary(db: Database, exp_id: str) -> dict:
     versions = db.get_prompt_versions(exp_id)
     test_cases = db.get_test_cases(exp_id)
     results = db.get_evaluation_results(exp_id)
+    evaluation_runs = db.get_evaluation_runs(exp_id)
     candidates = db.get_optimization_candidates(exp_id)
 
     successful = [r for r in results if r.get("execution_status") == "success"]
@@ -135,6 +140,7 @@ def get_experiment_summary(db: Database, exp_id: str) -> dict:
         "versions": versions,
         "test_cases": test_cases,
         "results": results,
+        "evaluation_runs": evaluation_runs,
         "candidates": candidates,
         "version_count": len(versions),
         "test_case_count": len(test_cases),

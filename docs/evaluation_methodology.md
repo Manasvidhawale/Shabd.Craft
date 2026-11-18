@@ -110,7 +110,13 @@ The judge must return valid JSON with:
 
 ### Temperature
 
-The judge runs at temperature=0.1 for maximum consistency.
+The judge runs at temperature=0.1 for consistency. This reduces variability but does not make judge scores deterministic.
+
+## Run Records and Comparability
+
+Evaluation Lab saves a run record with the prompt version, evaluation method, criterion weights, judge/generation configuration, constraints, and a snapshot of every test case. Each result points to that run and stores the exact input and reference output used at evaluation time. Editing a test case therefore does not rewrite the context of an earlier result.
+
+Version comparisons use one completed run per version and pair runs only when their recorded settings and test-suite snapshots match. Results created before run records existed remain visible in history, but must be re-evaluated before they can be compared under this rule.
 
 ---
 

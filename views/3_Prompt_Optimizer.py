@@ -232,6 +232,7 @@ if opt_mode == "Autonomous Multi-Generation Hill-Climbing (Iterative)":
                         evolved_ver = PromptVersion(
                             experiment_id=sel_exp,
                             version_number=next_n,
+                            parent_version_id=sel_ver,
                             version_label=f"Evolved ({best_v.optimization_strategy})",
                             system_prompt=best_v.system_prompt,
                             user_prompt_template=best_v.user_prompt_template,
@@ -340,6 +341,7 @@ if existing_candidates:
                             cand_version = PromptVersion(
                                 experiment_id=sel_exp,
                                 version_number=next_num,
+                                parent_version_id=sel_ver,
                                 version_label=cand["candidate_label"],
                                 system_prompt=cand["system_prompt"],
                                 user_prompt_template=cand["user_prompt_template"],

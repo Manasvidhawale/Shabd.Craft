@@ -8,6 +8,7 @@ evaluation results, and prompt library entries.
 from __future__ import annotations
 
 import json
+import hashlib
 import sqlite3
 from contextlib import contextmanager
 from pathlib import Path
@@ -61,6 +62,7 @@ class Database:
                     id TEXT PRIMARY KEY,
                     experiment_id TEXT NOT NULL,
                     version_number INTEGER DEFAULT 1,
+                    parent_version_id TEXT,
                     version_label TEXT DEFAULT 'Original',
                     system_prompt TEXT DEFAULT '',
                     user_prompt_template TEXT NOT NULL,
@@ -77,6 +79,21 @@ class Database:
                     FOREIGN KEY (experiment_id) REFERENCES experiments(id)
                 );
 
+                CREATE TABLE IF NOT EXISTS evaluation_runs (
+                    id TEXT PRIMARY KEY,
+                    experiment_id TEXT NOT NULL,
+                    prompt_version_id TEXT NOT NULL,
+                    method TEXT NOT NULL,
+                    weights TEXT NOT NULL DEFAULT '{}',
+                    config TEXT NOT NULL DEFAULT '{}',
+                    test_cases_snapshot TEXT NOT NULL DEFAULT '[]',
+                    signature TEXT NOT NULL DEFAULT '',
+                    status TEXT NOT NULL DEFAULT 'running',
+                    created_at TEXT NOT NULL,
+                    FOREIGN KEY (experiment_id) REFERENCES experiments(id),
+                    FOREIGN KEY (prompt_version_id) REFERENCES prompt_versions(id)
+                );
+
                 CREATE TABLE IF NOT EXISTS test_cases (
                     id TEXT PRIMARY KEY,
                     experiment_id TEXT NOT NULL,
@@ -91,6 +108,9 @@ class Database:
                     test_case_id TEXT NOT NULL,
                     prompt_version_id TEXT NOT NULL,
                     experiment_id TEXT NOT NULL,
+                    evaluation_run_id TEXT,
+                    input_data_snapshot TEXT DEFAULT '',
+                    expected_output_snapshot TEXT DEFAULT '',
                     generated_output TEXT DEFAULT '',
                     criterion_scores TEXT DEFAULT '[]',
                     overall_score REAL DEFAULT 0.0,
@@ -157,7 +177,18 @@ class Database:
                 CREATE INDEX IF NOT EXISTS idx_er_experiment ON evaluation_results(experiment_id);
                 CREATE INDEX IF NOT EXISTS idx_er_version ON evaluation_results(prompt_version_id);
                 CREATE INDEX IF NOT EXISTS idx_oc_experiment ON optimization_candidates(experiment_id);
+                CREATE INDEX IF NOT EXISTS idx_run_version ON evaluation_runs(prompt_version_id, created_at);
             """)
+            # Additive migrations keep existing local workspaces readable.
+            for table, column, definition in (
+                ("prompt_versions", "parent_version_id", "TEXT"),
+                ("evaluation_results", "evaluation_run_id", "TEXT"),
+                ("evaluation_results", "input_data_snapshot", "TEXT DEFAULT ''"),
+                ("evaluation_results", "expected_output_snapshot", "TEXT DEFAULT ''"),
+            ):
+                columns = {row["name"] for row in conn.execute(f"PRAGMA table_info({table})")}
+                if column not in columns:
+                    conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {definition}")
 
     # ── Experiments ────────────────────────────────────────────────────
 
@@ -192,6 +223,7 @@ class Database:
 
     def delete_experiment(self, exp_id: str):
         with self._connect() as conn:
+            conn.execute("DELETE FROM evaluation_runs WHERE experiment_id = ?", (exp_id,))
             conn.execute("DELETE FROM evaluation_results WHERE experiment_id = ?", (exp_id,))
             conn.execute("DELETE FROM optimization_candidates WHERE experiment_id = ?", (exp_id,))
             conn.execute("DELETE FROM test_cases WHERE experiment_id = ?", (exp_id,))
@@ -202,14 +234,27 @@ class Database:
 
     def save_prompt_version(self, pv: PromptVersion) -> str:
         with self._connect() as conn:
+            duplicate = conn.execute(
+                "SELECT 1 FROM prompt_versions WHERE experiment_id = ? AND version_number = ?",
+                (pv.experiment_id, pv.version_number),
+            ).fetchone()
+            if duplicate:
+                raise ValueError(f"Version number {pv.version_number} already exists in this experiment.")
+            if pv.parent_version_id:
+                parent = conn.execute(
+                    "SELECT experiment_id FROM prompt_versions WHERE id = ?",
+                    (pv.parent_version_id,),
+                ).fetchone()
+                if not parent or parent["experiment_id"] != pv.experiment_id:
+                    raise ValueError("A revision parent must be an existing version in the same experiment.")
             conn.execute(
                 "INSERT INTO prompt_versions "
-                "(id, experiment_id, version_number, version_label, system_prompt, "
+                "(id, experiment_id, version_number, parent_version_id, version_label, system_prompt, "
                 "user_prompt_template, technique, few_shot_examples, output_format, "
                 "variables, model_name, temperature, max_tokens, is_optimized, "
                 "optimization_strategy, created_at) "
-                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-                (pv.id, pv.experiment_id, pv.version_number, pv.version_label,
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                (pv.id, pv.experiment_id, pv.version_number, pv.parent_version_id, pv.version_label,
                  pv.system_prompt, pv.user_prompt_template, pv.technique.value,
                  json.dumps([e.model_dump() for e in pv.few_shot_examples]),
                  pv.output_format.value, json.dumps(pv.variables),
@@ -238,10 +283,23 @@ class Database:
                 "SELECT MAX(version_number) as mx FROM prompt_versions WHERE experiment_id = ?",
                 (experiment_id,),
             ).fetchone()
-            return (row["mx"] or 0) + 1
+            counter_key = f"version_counter:{experiment_id}"
+            counter = conn.execute("SELECT value FROM app_meta WHERE key = ?", (counter_key,)).fetchone()
+            next_number = max((row["mx"] or 0) + 1, int(counter["value"]) if counter else 1)
+            conn.execute("INSERT OR REPLACE INTO app_meta (key, value) VALUES (?, ?)", (counter_key, str(next_number + 1)))
+            return next_number
 
     def delete_prompt_version(self, version_id: str):
         with self._connect() as conn:
+            conn.execute("DELETE FROM evaluation_runs WHERE prompt_version_id = ?", (version_id,))
+            version = conn.execute("SELECT experiment_id FROM prompt_versions WHERE id = ?", (version_id,)).fetchone()
+            if version:
+                exp_id = version["experiment_id"]
+                max_row = conn.execute("SELECT MAX(version_number) AS mx FROM prompt_versions WHERE experiment_id = ?", (exp_id,)).fetchone()
+                counter_key = f"version_counter:{exp_id}"
+                counter = conn.execute("SELECT value FROM app_meta WHERE key = ?", (counter_key,)).fetchone()
+                next_number = max((max_row["mx"] or 0) + 1, int(counter["value"]) if counter else 1)
+                conn.execute("INSERT OR REPLACE INTO app_meta (key, value) VALUES (?, ?)", (counter_key, str(next_number)))
             conn.execute("DELETE FROM evaluation_results WHERE prompt_version_id = ?", (version_id,))
             conn.execute("DELETE FROM optimization_candidates WHERE original_version_id = ?", (version_id,))
             conn.execute("DELETE FROM prompt_versions WHERE id = ?", (version_id,))
@@ -260,26 +318,59 @@ class Database:
         few_shot_examples: list[dict] | None = None,
         variables: list[str] | None = None,
     ):
+        raise ValueError("Prompt versions are immutable; save these values as a new revision.")
+
+    def create_evaluation_run(
+        self, experiment_id: str, prompt_version_id: str, method: str,
+        weights: dict, config: dict, test_cases: list[dict],
+    ) -> str:
+        """Persist the complete evaluation context before execution starts."""
+        run_id = _new_id()
+        snapshot = [{
+            "id": tc["id"], "input_data": tc.get("input_data", ""),
+            "expected_output": tc.get("expected_output", ""),
+            "metadata": tc.get("metadata", {}),
+        } for tc in test_cases]
+        signature_data = {"method": method, "weights": weights, "config": config, "test_cases": snapshot}
+        signature = hashlib.sha256(json.dumps(signature_data, sort_keys=True).encode("utf-8")).hexdigest()
         with self._connect() as conn:
             conn.execute(
-                "UPDATE prompt_versions SET version_label = ?, system_prompt = ?, "
-                "user_prompt_template = ?, technique = ?, output_format = ?, "
-                "model_name = ?, temperature = ?, max_tokens = ?, "
-                "few_shot_examples = ?, variables = ? WHERE id = ?",
-                (
-                    version_label,
-                    system_prompt,
-                    user_prompt_template,
-                    technique,
-                    output_format,
-                    model_name,
-                    temperature,
-                    max_tokens,
-                    json.dumps(few_shot_examples or []),
-                    json.dumps(variables or []),
-                    version_id,
-                ),
+                "INSERT INTO evaluation_runs (id, experiment_id, prompt_version_id, method, weights, config, test_cases_snapshot, signature, status, created_at) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'running', ?)",
+                (run_id, experiment_id, prompt_version_id, method, json.dumps(weights, sort_keys=True),
+                 json.dumps(config, sort_keys=True), json.dumps(snapshot, sort_keys=True), signature, _now()),
             )
+        return run_id
+
+    def update_evaluation_run_status(self, run_id: str, status: str):
+        with self._connect() as conn:
+            conn.execute("UPDATE evaluation_runs SET status = ? WHERE id = ?", (status, run_id))
+
+    def get_evaluation_runs(self, experiment_id: str, prompt_version_id: str | None = None) -> list[dict]:
+        with self._connect() as conn:
+            if prompt_version_id:
+                rows = conn.execute(
+                    "SELECT * FROM evaluation_runs WHERE experiment_id = ? AND prompt_version_id = ? ORDER BY created_at DESC",
+                    (experiment_id, prompt_version_id),
+                ).fetchall()
+            else:
+                rows = conn.execute(
+                    "SELECT * FROM evaluation_runs WHERE experiment_id = ? ORDER BY created_at DESC",
+                    (experiment_id,),
+                ).fetchall()
+            return [dict(row) for row in rows]
+
+    def get_comparable_evaluation_run_pairs(
+        self, experiment_id: str, version_a_id: str, version_b_id: str,
+    ) -> list[tuple[dict, dict]]:
+        """Return completed run pairs with identical settings and test snapshots."""
+        runs_a = self.get_evaluation_runs(experiment_id, version_a_id)
+        runs_b = self.get_evaluation_runs(experiment_id, version_b_id)
+        return [
+            (a, b) for a in runs_a for b in runs_b
+            if a["status"] == "done" and b["status"] == "done"
+            and a["signature"] and a["signature"] == b["signature"]
+        ]
 
     # ── Test Cases ─────────────────────────────────────────────────────
 
@@ -327,12 +418,13 @@ class Database:
         with self._connect() as conn:
             conn.execute(
                 "INSERT INTO evaluation_results "
-                "(id, test_case_id, prompt_version_id, experiment_id, generated_output, "
+                "(id, test_case_id, prompt_version_id, experiment_id, evaluation_run_id, input_data_snapshot, expected_output_snapshot, generated_output, "
                 "criterion_scores, overall_score, weaknesses, suggestions, "
                 "evaluation_method, is_reference_verified, execution_status, "
                 "error_message, latency_ms, tokens_used, cost_estimate, is_demo, created_at) "
-                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 (er.id, er.test_case_id, er.prompt_version_id, er.experiment_id,
+                 er.evaluation_run_id, er.input_data_snapshot, er.expected_output_snapshot,
                  er.generated_output,
                  json.dumps([s.model_dump() for s in er.criterion_scores]),
                  er.overall_score,
@@ -352,12 +444,13 @@ class Database:
         with self._connect() as conn:
             conn.executemany(
                 "INSERT INTO evaluation_results "
-                "(id, test_case_id, prompt_version_id, experiment_id, generated_output, "
+                "(id, test_case_id, prompt_version_id, experiment_id, evaluation_run_id, input_data_snapshot, expected_output_snapshot, generated_output, "
                 "criterion_scores, overall_score, weaknesses, suggestions, "
                 "evaluation_method, is_reference_verified, execution_status, "
                 "error_message, latency_ms, tokens_used, cost_estimate, is_demo, created_at) "
-                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 [(er.id, er.test_case_id, er.prompt_version_id, er.experiment_id,
+                  er.evaluation_run_id, er.input_data_snapshot, er.expected_output_snapshot,
                   er.generated_output,
                   json.dumps([s.model_dump() for s in er.criterion_scores]),
                   er.overall_score,
@@ -369,9 +462,17 @@ class Database:
                   1 if er.is_demo else 0, er.created_at) for er in results],
             )
 
-    def get_evaluation_results(self, experiment_id: str, prompt_version_id: Optional[str] = None) -> list[dict]:
+    def get_evaluation_results(
+        self, experiment_id: str, prompt_version_id: Optional[str] = None,
+        evaluation_run_id: Optional[str] = None,
+    ) -> list[dict]:
         with self._connect() as conn:
-            if prompt_version_id:
+            if evaluation_run_id:
+                rows = conn.execute(
+                    "SELECT * FROM evaluation_results WHERE experiment_id = ? AND evaluation_run_id = ? ORDER BY created_at",
+                    (experiment_id, evaluation_run_id),
+                ).fetchall()
+            elif prompt_version_id:
                 rows = conn.execute(
                     "SELECT * FROM evaluation_results WHERE experiment_id = ? AND prompt_version_id = ? "
                     "ORDER BY created_at",
@@ -495,6 +596,7 @@ class Database:
 
     def clear_all_experiments(self):
         with self._connect() as conn:
+            conn.execute("DELETE FROM evaluation_runs")
             conn.execute("DELETE FROM evaluation_results")
             conn.execute("DELETE FROM optimization_candidates")
             conn.execute("DELETE FROM test_cases")

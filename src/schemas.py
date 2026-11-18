@@ -105,6 +105,7 @@ class PromptVersion(BaseModel):
     id: str = Field(default_factory=_new_id)
     experiment_id: str
     version_number: int = 1
+    parent_version_id: Optional[str] = None
     version_label: str = "Original"
     system_prompt: str = ""
     user_prompt_template: str
@@ -214,6 +215,9 @@ class EvaluationResult(BaseModel):
     test_case_id: str
     prompt_version_id: str
     experiment_id: str
+    evaluation_run_id: Optional[str] = None
+    input_data_snapshot: str = ""
+    expected_output_snapshot: str = ""
     generated_output: str = ""
     criterion_scores: list[CriterionScore] = Field(default_factory=list)
     overall_score: float = Field(default=0.0, ge=0, le=100)

@@ -7,6 +7,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from src.comparison_engine import build_word_diff_html, compare_versions
+import pytest
 
 
 class TestWordDiffHtml:
@@ -37,4 +38,26 @@ class TestCompareVersions:
         comp = compare_versions(va, vb, ra, rb)
         assert comp.winner == "b"
         assert comp.version_b_overall == 85.0
+
+    def test_compares_only_shared_test_cases(self):
+        va = {"id": "a", "version_label": "A"}
+        vb = {"id": "b", "version_label": "B"}
+        ra = [
+            {"test_case_id": "shared", "execution_status": "success", "overall_score": 80, "criterion_scores": "[]"},
+            {"test_case_id": "only-a", "execution_status": "success", "overall_score": 0, "criterion_scores": "[]"},
+        ]
+        rb = [{"test_case_id": "shared", "execution_status": "success", "overall_score": 70, "criterion_scores": "[]"}]
+        comparison = compare_versions(va, vb, ra, rb)
+        assert comparison.version_a_overall == 80
+        assert comparison.version_b_overall == 70
+        assert comparison.test_case_count == 1
+
+    def test_rejects_mixed_runs_for_one_version(self):
+        version = {"id": "a", "version_label": "A"}
+        results = [
+            {"evaluation_run_id": "run-1", "execution_status": "success", "overall_score": 80, "criterion_scores": "[]"},
+            {"evaluation_run_id": "run-2", "execution_status": "success", "overall_score": 90, "criterion_scores": "[]"},
+        ]
+        with pytest.raises(ValueError, match="one evaluation run"):
+            compare_versions(version, {"id": "b"}, results, [])
 
