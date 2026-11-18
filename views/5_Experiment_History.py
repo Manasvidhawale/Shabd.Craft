@@ -125,9 +125,13 @@ for exp in filtered:
                         st.switch_page("views/1_Prompt_Workshop.py")
                 with vc3:
                     if len(versions) > 1 and st.button(":material/delete: Delete", key=f"hist_del_v_{v['id']}", use_container_width=True):
-                        db.delete_prompt_version(v["id"])
-                        st.toast("Version deleted.", icon=":material/delete:")
-                        st.rerun()
+                        try:
+                            db.delete_prompt_version(v["id"])
+                        except ValueError as exc:
+                            st.warning(str(exc))
+                        else:
+                            st.toast("Version deleted.", icon=":material/delete:")
+                            st.rerun()
 
         st.divider()
         a1, a2, a3, a4, a5 = st.columns(5)

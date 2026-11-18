@@ -79,6 +79,7 @@ workflow_pages = [
 ]
 
 management_pages = [
+    st.Page("views/8_Branches.py", title="Prompt Branches", icon=":material/account_tree:", url_path="branches"),
     st.Page("views/5_Experiment_History.py", title="Experiment History", icon=":material/history:", url_path="history"),
     st.Page("views/6_Prompt_Library.py", title="Prompt Library", icon=":material/menu_book:", url_path="library"),
     st.Page("views/7_Settings.py", title="Settings", icon=":material/settings:", url_path="settings"),

@@ -22,6 +22,7 @@ import plotly.graph_objects as go
 import streamlit as st
 
 from src.config import settings
+from src.experiment_service import create_revision_branch
 from src.evaluation_engine import (
     aggregate_results,
     calculate_weighted_score,
@@ -701,8 +702,13 @@ with tab_security:
 
             if st.button(":material/add_circle: Save Hardened Copy as New Version", key=f"save_hard_{selected_ver_id}"):
                 next_num = db.get_next_version_number(selected_exp_id)
+                branch_id, branch_name = create_revision_branch(
+                    db, selected_exp_id, selected_ver_id, f"hardened-v{next_num}",
+                    "Prompt hardening experiment",
+                )
                 hardened_ver = PromptVersion(
                     experiment_id=selected_exp_id,
+                    branch_id=branch_id,
                     version_number=next_num,
                     parent_version_id=selected_ver_id,
                     version_label=f"{sec_version.version_label} (Hardened)",
@@ -719,7 +725,8 @@ with tab_security:
                 )
                 new_ver_id = db.save_prompt_version(hardened_ver)
                 st.session_state["current_version_id"] = new_ver_id
-                st.toast(f"Saved hardened version v{next_num}.", icon=":material/check_circle:")
+                st.session_state["current_branch_id"] = branch_id
+                st.toast(f"Saved v{next_num} on '{branch_name}'.", icon=":material/check_circle:")
                 st.rerun()
 
 # ── Action Bar: Dispatch Background Coordinator Thread ────────────────
