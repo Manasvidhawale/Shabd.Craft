@@ -43,7 +43,7 @@ from src.ui_theme import status_badge
 
 db = get_database()
 
-render_page_header("Prompt Optimizer", "Generate improved prompt candidates, benchmark them, and promote winners.")
+render_page_header("Improve a prompt", "Create and test alternatives, then save the ones you want to keep.")
 
 # ── Select Experiment & Version ─────────────────────────────────────────
 experiments = db.list_experiments()

@@ -64,7 +64,7 @@ from src.ui_theme import status_badge
 
 db = get_database()
 
-render_page_header("Evaluation Lab", "Benchmark prompts against test suites, inspect telemetry, and audit security resistance.")
+render_page_header("Test prompts", "Run prompts on sample inputs and review their results.")
 
 
 # ── Concurrency Run Handle & Coordinator Thread ─────────────────────────

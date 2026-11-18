@@ -70,7 +70,7 @@ for key, default in [
     if key not in st.session_state:
         st.session_state[key] = default
 
-render_page_header("Prompt Workshop", "Create, edit, test, and version prompts with live token analytics.")
+render_page_header("Write a prompt", "Edit the prompt on a branch, then save your changes as a version.")
 
 # ── Delete Dialog ──────────────────────────────────────────────────────
 @st.dialog("Delete Prompt")
