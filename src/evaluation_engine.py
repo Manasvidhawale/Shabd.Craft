@@ -10,6 +10,7 @@ from __future__ import annotations
 from typing import Optional
 from concurrent.futures import ThreadPoolExecutor, as_completed
 import threading
+from contextvars import copy_context
 
 from src.config import settings
 from src.schemas import (
@@ -233,7 +234,10 @@ def evaluate_batch(
     num_workers = min(max(1, max_workers), len(test_cases))
     if num_workers > 1:
         with ThreadPoolExecutor(max_workers=num_workers) as executor:
-            futures = [executor.submit(_eval_worker, i, tc) for i, tc in enumerate(test_cases)]
+            futures = [
+                executor.submit(copy_context().run, _eval_worker, i, tc)
+                for i, tc in enumerate(test_cases)
+            ]
             for f in as_completed(futures):
                 f.result()
     else:

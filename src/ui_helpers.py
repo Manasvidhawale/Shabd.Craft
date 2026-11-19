@@ -11,7 +11,7 @@ import json
 from pathlib import Path
 import streamlit as st
 
-from src.config import settings
+from src.config import Settings, set_current_settings, settings
 from src.database import Database
 from src.schemas import (
     EvaluationWeights,
@@ -35,9 +35,13 @@ _WORKSHOP_WIDGET_KEYS = (
 )
 
 
-@st.cache_resource
 def get_database() -> Database:
-    """Return cached SQLite Database instance and seed starter templates once."""
+    """Create a database facade for the currently configured workspace path.
+
+    Database instances hold no open connections or query results, so keeping
+    them in Streamlit's process-wide resource cache only risks binding a rerun
+    to an old database path. Every operation opens a fresh SQLite connection.
+    """
     db = Database(settings.db_path)
     if db.get_meta("templates_seeded") != "1":
         _seed_builtin_templates(db)
@@ -186,9 +190,14 @@ def get_active_eval_weights() -> EvaluationWeights:
 
 def apply_user_settings_to_runtime() -> None:
     """Apply in-session user preferences (API key, default model) to runtime settings."""
+    # Build a new settings snapshot for this Streamlit execution context. Engine
+    # code reads through the context-local proxy, avoiding cross-session writes
+    # to a shared process-wide settings object.
+    runtime_settings = Settings()
     api_key = st.session_state.get("user_openai_api_key")
-    if api_key is not None:
-        settings.openai_api_key = api_key
+    if api_key:
+        runtime_settings.openai_api_key = api_key
     default_model = st.session_state.get("user_default_model")
-    if default_model in settings.AVAILABLE_MODELS:
-        settings.default_model = default_model
+    if default_model in runtime_settings.AVAILABLE_MODELS:
+        runtime_settings.default_model = default_model
+    set_current_settings(runtime_settings)

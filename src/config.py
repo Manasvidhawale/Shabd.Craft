@@ -7,11 +7,24 @@ Never exposes API keys in logs, UI, or database.
 
 import os
 from pathlib import Path
-from dotenv import load_dotenv
+from contextvars import ContextVar, Token
+from copy import deepcopy
+from contextlib import contextmanager
+from collections.abc import Iterator
+from dotenv import dotenv_values
 
-# Load .env from project root
 _PROJECT_ROOT = Path(__file__).parent.parent
-load_dotenv(_PROJECT_ROOT / ".env")
+_ENV_FILE = _PROJECT_ROOT / ".env"
+
+
+def _environment_values() -> dict[str, str]:
+    """Read .env on demand, while letting real process environment win."""
+    file_values = dotenv_values(_ENV_FILE)
+    return {
+        key: os.environ.get(key, value)
+        for key, value in file_values.items()
+        if value is not None
+    }
 
 
 class Settings:
@@ -22,25 +35,27 @@ class Settings:
 
     def _reload(self):
         """Reload settings from environment."""
-        self.openai_api_key: str = os.getenv("OPENAI_API_KEY", "")
-        self.groq_api_key: str = os.getenv("GROQ_API_KEY", "")
-        self.openai_base_url: str = os.getenv("OPENAI_BASE_URL", "")
+        env = _environment_values()
+        read = lambda name, default="": os.getenv(name, env.get(name, default))
+        self.openai_api_key: str = read("OPENAI_API_KEY")
+        self.groq_api_key: str = read("GROQ_API_KEY")
+        self.openai_base_url: str = read("OPENAI_BASE_URL")
 
         # Automatically adopt GROQ_API_KEY if OPENAI_API_KEY is not set
         if not self.openai_api_key and self.groq_api_key:
             self.openai_api_key = self.groq_api_key
 
-        raw_def_model = os.getenv("SHABDCRAFT_DEFAULT_MODEL", "").strip()
+        raw_def_model = read("SHABDCRAFT_DEFAULT_MODEL").strip()
         if self.openai_api_key.startswith("gsk_"):
             self.default_model = "openai/gpt-oss-20b" if (not raw_def_model or raw_def_model.startswith("gpt-")) else raw_def_model
         else:
             self.default_model = raw_def_model or "gpt-3.5-turbo"
-        self.demo_mode: bool = os.getenv("SHABDCRAFT_DEMO_MODE", "false").lower() == "true"
-        self.db_path: str = os.getenv("SHABDCRAFT_DB_PATH", str(_PROJECT_ROOT / "data" / "shabdcraft.db"))
-        self.max_test_cases: int = int(os.getenv("SHABDCRAFT_MAX_TEST_CASES", "50"))
-        self.max_optimization_rounds: int = int(os.getenv("SHABDCRAFT_MAX_OPTIMIZATION_ROUNDS", "5"))
-        self.max_retries: int = int(os.getenv("SHABDCRAFT_MAX_RETRIES", "3"))
-        self.timeout: int = int(os.getenv("SHABDCRAFT_TIMEOUT", "60"))
+        self.demo_mode: bool = read("SHABDCRAFT_DEMO_MODE", "false").lower() == "true"
+        self.db_path: str = read("SHABDCRAFT_DB_PATH", str(_PROJECT_ROOT / "data" / "shabdcraft.db"))
+        self.max_test_cases: int = int(read("SHABDCRAFT_MAX_TEST_CASES", "50"))
+        self.max_optimization_rounds: int = int(read("SHABDCRAFT_MAX_OPTIMIZATION_ROUNDS", "5"))
+        self.max_retries: int = int(read("SHABDCRAFT_MAX_RETRIES", "3"))
+        self.timeout: int = int(read("SHABDCRAFT_TIMEOUT", "60"))
 
     @property
     def is_groq(self) -> bool:
@@ -129,5 +144,55 @@ class Settings:
     }
 
 
-# Singleton settings instance
-settings = Settings()
+_base_settings = Settings()
+_active_settings: ContextVar[Settings | None] = ContextVar("shabdcraft_settings", default=None)
+
+
+class _SettingsProxy:
+    """Resolve settings from the current execution context instead of a global session."""
+
+    def __getattr__(self, name):
+        active = _active_settings.get()
+        return getattr(active if active is not None else _base_settings, name)
+
+    def __setattr__(self, name, value):
+        active = _active_settings.get()
+        setattr(active if active is not None else _base_settings, name, value)
+
+
+settings = _SettingsProxy()
+
+
+def current_settings() -> Settings:
+    """Return the settings snapshot active in this execution context."""
+    active = _active_settings.get()
+    return active if active is not None else _base_settings
+
+
+def set_current_settings(value: Settings) -> Token:
+    """Install a settings snapshot in the current execution context."""
+    return _active_settings.set(value)
+
+
+def reset_current_settings(token: Token) -> None:
+    """Restore the settings context that was active before a temporary override."""
+    _active_settings.reset(token)
+
+
+def clear_current_settings() -> None:
+    """Clear a context-local override (mainly useful when a test run ends)."""
+    _active_settings.set(None)
+
+
+@contextmanager
+def use_settings(value: Settings) -> Iterator[None]:
+    token = set_current_settings(value)
+    try:
+        yield
+    finally:
+        reset_current_settings(token)
+
+
+def snapshot_current_settings() -> Settings:
+    """Copy the active settings for safe transfer to background work."""
+    return deepcopy(current_settings())
