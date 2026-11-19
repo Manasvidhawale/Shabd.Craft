@@ -15,6 +15,7 @@ Shabd.Craft is designed with strict separation of concerns between the UI, busin
 │  views/1_Prompt_Workshop    views/5_Experiment_History  │
 │  views/2_Evaluation_Lab     views/6_Prompt_Library      │
 │  views/3_Prompt_Optimizer   views/7_Settings            │
+│                             views/8_Branches            │
 │                                                         │
 │  Technology: Streamlit + Plotly + Custom CSS            │
 └────────────────────────┬────────────────────────────────┘
@@ -133,18 +134,28 @@ experiments
   id, name, category, description, status, created_at, updated_at
 
 prompt_versions
-  id, experiment_id→, version_number, version_label,
+  id, experiment_id→, branch_id, version_number, parent_version_id,
+  version_label,
   system_prompt, user_prompt_template, technique,
   few_shot_examples (JSON), output_format, variables (JSON),
   model_name, temperature, max_tokens, is_optimized,
   optimization_strategy, created_at
+
+prompt_branches
+  id, experiment_id→, name, head_version_id→, base_version_id→,
+  description, created_at, updated_at
+
+evaluation_runs
+  id, experiment_id→, prompt_version_id→, method, weights,
+  config, test_cases_snapshot, signature, status, created_at
 
 test_cases
   id, experiment_id→, input_data, expected_output,
   metadata (JSON)
 
 evaluation_results
-  id, test_case_id→, prompt_version_id→, experiment_id→,
+  id, test_case_id→, prompt_version_id→, experiment_id→, evaluation_run_id,
+  input_data_snapshot, expected_output_snapshot,
   generated_output, criterion_scores (JSON), overall_score,
   weaknesses (JSON), suggestions (JSON), evaluation_method,
   is_reference_verified, execution_status, error_message,
@@ -180,3 +191,7 @@ Demo mode allows the application to be demonstrated and tested without consuming
 
 ### Why `{{variable}}` syntax?
 Double-brace syntax avoids conflicts with Python f-string syntax and Jinja2, while being clearly visible in prompt text.
+
+### Why record evaluation runs?
+
+Each Evaluation Lab batch stores its method, weights, constraints, provider/model context, and a snapshot of the test cases. Results retain the run ID and input/reference snapshots. Comparisons pair completed runs only when their recorded evaluation settings and test-suite snapshots match. Existing pre-migration results remain available for review, but need fresh runs before they can be fairly compared.

@@ -222,4 +222,6 @@ class TestVerbosityPenaltyAndPairwiseJudge:
         assert len(results) == 8
         for i, res in enumerate(results):
             assert res.test_case_id == f"tc_{i}"
+            assert res.input_data_snapshot == f"Input message {i}"
+            assert res.expected_output_snapshot == f"Output {i}"
         assert len(progress_calls) == 8

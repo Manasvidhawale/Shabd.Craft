@@ -72,22 +72,23 @@ if (_ASSETS_DIR / "logo.svg").exists() and (_ASSETS_DIR / "icon.svg").exists():
 
 workflow_pages = [
     st.Page("views/0_Home.py", title="Home", icon=":material/dashboard:", default=True, url_path="home"),
-    st.Page("views/1_Prompt_Workshop.py", title="Prompt Workshop", icon=":material/edit_note:", url_path="workshop"),
-    st.Page("views/2_Evaluation_Lab.py", title="Evaluation Lab", icon=":material/biotech:", url_path="eval-lab"),
-    st.Page("views/3_Prompt_Optimizer.py", title="Prompt Optimizer", icon=":material/auto_fix_high:", url_path="optimizer"),
-    st.Page("views/4_Compare_Versions.py", title="Compare Versions", icon=":material/compare_arrows:", url_path="compare"),
+st.Page("views/1_Prompt_Workshop.py", title="Write", icon=":material/edit_note:", url_path="workshop"),
+st.Page("views/2_Evaluation_Lab.py", title="Test", icon=":material/biotech:", url_path="eval-lab"),
+st.Page("views/3_Prompt_Optimizer.py", title="Improve", icon=":material/auto_fix_high:", url_path="optimizer"),
+st.Page("views/4_Compare_Versions.py", title="Compare", icon=":material/compare_arrows:", url_path="compare"),
 ]
 
 management_pages = [
-    st.Page("views/5_Experiment_History.py", title="Experiment History", icon=":material/history:", url_path="history"),
-    st.Page("views/6_Prompt_Library.py", title="Prompt Library", icon=":material/menu_book:", url_path="library"),
+st.Page("views/8_Branches.py", title="Branches", icon=":material/account_tree:", url_path="branches"),
+st.Page("views/5_Experiment_History.py", title="History", icon=":material/history:", url_path="history"),
+st.Page("views/6_Prompt_Library.py", title="Templates", icon=":material/menu_book:", url_path="library"),
     st.Page("views/7_Settings.py", title="Settings", icon=":material/settings:", url_path="settings"),
 ]
 
 nav = st.navigation(
     {
-        "Workflow": workflow_pages,
-        "Management": management_pages,
+        "Build": workflow_pages,
+        "Your work": management_pages,
     },
     position="sidebar",
 )

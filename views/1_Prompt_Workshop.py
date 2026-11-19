@@ -70,7 +70,7 @@ for key, default in [
     if key not in st.session_state:
         st.session_state[key] = default
 
-render_page_header("Prompt Workshop", "Create, edit, test, and version prompts with live token analytics.")
+render_page_header("Write a prompt", "Edit the prompt on a branch, then save your changes as a version.")
 
 # ── Delete Dialog ──────────────────────────────────────────────────────
 @st.dialog("Delete Prompt")
@@ -80,14 +80,18 @@ def confirm_delete_dialog(exp_id: str, ver_id: str | None, versions_count: int):
     with dc1:
         if versions_count > 1 and ver_id:
             if st.button("Delete This Version", type="primary", use_container_width=True):
-                db.delete_prompt_version(ver_id)
-                remaining = db.get_prompt_versions(exp_id)
-                if remaining:
-                    exp = db.get_experiment(exp_id)
-                    if exp:
-                        load_version_into_workshop(db, exp, remaining[0])
-                st.toast("Version deleted.", icon=":material/delete:")
-                st.rerun()
+                try:
+                    db.delete_prompt_version(ver_id)
+                except ValueError as exc:
+                    st.error(str(exc))
+                else:
+                    remaining = db.get_prompt_versions(exp_id)
+                    if remaining:
+                        exp = db.get_experiment(exp_id)
+                        if exp:
+                            load_version_into_workshop(db, exp, remaining[0])
+                    st.toast("Version deleted.", icon=":material/delete:")
+                    st.rerun()
         else:
             st.caption("Only 1 version in experiment.")
     with dc2:
@@ -147,30 +151,44 @@ if selected_target == "__new__" and st.session_state.get("ws_editing_exp_id") is
 
 selected_versions = []
 selected_ver_id = None
+selected_branch_id = None
 if selected_target != "__new__":
     selected_versions = db.get_prompt_versions(selected_target)
     ver_map = {v["id"]: v for v in selected_versions}
-    with sw2:
-        if selected_versions:
-            cur_ver = st.session_state.get("ws_editing_ver_id")
-            if cur_ver not in ver_map:
-                cur_ver = selected_versions[0]["id"]
-            selected_ver_id = st.selectbox(
-                "Prompt Version",
-                [v["id"] for v in selected_versions],
-                index=[v["id"] for v in selected_versions].index(cur_ver),
-                format_func=lambda vid: f"v{ver_map[vid]['version_number']}: {ver_map[vid]['version_label']}",
-                key="ws_version_selector",
+    branches = db.get_prompt_branches(selected_target)
+    branch_map = {branch["id"]: branch for branch in branches}
+    if branches:
+        current_branch = st.session_state.get("current_branch_id")
+        if current_branch not in branch_map:
+            current_branch = next((b["id"] for b in branches if b["name"].lower() == "main"), branches[0]["id"])
+        with sw2:
+            selected_branch_id = st.selectbox(
+                "Branch",
+                list(branch_map),
+                index=list(branch_map).index(current_branch),
+                format_func=lambda branch_id: f"{branch_map[branch_id]['name']} · v{branch_map[branch_id].get('head_version_number', '?')}",
+                key=f"ws_branch_selector_{selected_target}",
             )
-    with sw3:
-        st.markdown("<div style='height:28px;'></div>", unsafe_allow_html=True)
+        st.session_state["current_branch_id"] = selected_branch_id
+        selected_branch = branch_map[selected_branch_id]
+        selected_ver_id = selected_branch.get("head_version_id")
+        with sw3:
+            if st.button("Manage branches", use_container_width=True):
+                st.session_state["current_experiment_id"] = selected_target
+                st.switch_page("views/8_Branches.py")
         if selected_ver_id and (
             st.session_state.get("ws_editing_exp_id") != selected_target
             or st.session_state.get("ws_editing_ver_id") != selected_ver_id
         ):
             load_version_into_workshop(db, exp_map[selected_target], ver_map[selected_ver_id])
             st.rerun()
-        elif selected_target != "__new__" and st.button("+ New Prompt", use_container_width=True):
+        elif not selected_ver_id:
+            st.info("This branch has no saved version yet. Create a prompt version in the Workshop.")
+    else:
+        with sw2:
+            st.caption("No versions yet")
+    with sw3:
+        if not branches and st.button("+ New Prompt", use_container_width=True):
             st.session_state["ws_editing_exp_id"] = None
             st.session_state["ws_editing_ver_id"] = None
             st.session_state["ws_exp_name"] = ""
@@ -519,16 +537,14 @@ with st.container(border=True):
             value=db.get_prompt_version(editing_ver_id).get("version_label", "Updated") if db.get_prompt_version(editing_ver_id) else "Updated",
             key="ws_ver_label_input",
         )
-        b1, b2, b3, b4, b5 = st.columns([2, 1.5, 1.5, 1.5, 1])
+        b1, b2, b3, b4 = st.columns([2, 1.5, 1.5, 1])
         with b1:
             run_clicked = st.button(":material/play_arrow: Run Prompt", type="primary", use_container_width=True)
         with b2:
-            update_clicked = st.button(":material/save: Save Changes", use_container_width=True)
+            save_revision_clicked = st.button(":material/save: Save as New Version", use_container_width=True)
         with b3:
-            new_ver_clicked = st.button(":material/add_circle: New Version", use_container_width=True)
-        with b4:
             eval_clicked = st.button(":material/biotech: Evaluate", use_container_width=True)
-        with b5:
+        with b4:
             delete_clicked = st.button(":material/delete: Delete", use_container_width=True)
         save_new_clicked = False
         reset_clicked = False
@@ -542,8 +558,7 @@ with st.container(border=True):
             eval_clicked = st.button(":material/biotech: Send to Evaluation", use_container_width=True)
         with b4:
             reset_clicked = st.button(":material/restart_alt: Clear Form", use_container_width=True)
-        update_clicked = False
-        new_ver_clicked = False
+        save_revision_clicked = False
         delete_clicked = False
         ver_label_val = "Initial"
 
@@ -633,30 +648,16 @@ if save_new_clicked:
         st.session_state["current_version_id"] = ver_id
         st.session_state["ws_editing_exp_id"] = exp_id
         st.session_state["ws_editing_ver_id"] = ver_id
+        st.session_state["current_branch_id"] = db.get_prompt_branches(exp_id)[0]["id"]
+        st.session_state.pop(f"ws_branch_selector_{exp_id}", None)
         st.toast(f"Prompt '{name}' saved.", icon=":material/save:")
         st.rerun()
 
-if update_clicked and editing_exp_id and editing_ver_id:
-    if not user_prompt_val:
-        st.error("Please enter a user prompt template.")
-    else:
-        db.update_prompt_version(
-            version_id=editing_ver_id,
-            version_label=(ver_label_val or "Original").strip(),
-            system_prompt=sys_prompt_val,
-            user_prompt_template=user_prompt_val,
-            technique=tech_val,
-            output_format=fmt_val,
-            model_name=model_val,
-            temperature=temp_val,
-            max_tokens=max_tok_val,
-            few_shot_examples=_collect_few_shots(),
-            variables=extract_variables(user_prompt_val),
-        )
-        st.toast("Prompt version updated.", icon=":material/save:")
-
-if new_ver_clicked and editing_exp_id:
-    if not user_prompt_val:
+if save_revision_clicked and editing_exp_id and editing_ver_id:
+    active_branch = db.get_prompt_branch(selected_branch_id) if selected_branch_id else None
+    if not active_branch:
+        st.error("Select an active branch before saving a version.")
+    elif not user_prompt_val:
         st.error("Please enter a user prompt template.")
     else:
         next_num = db.get_next_version_number(editing_exp_id)
@@ -665,7 +666,9 @@ if new_ver_clicked and editing_exp_id:
             label = f"Revision v{next_num}"
         new_pv = PromptVersion(
             experiment_id=editing_exp_id,
+            branch_id=selected_branch_id,
             version_number=next_num,
+            parent_version_id=active_branch["head_version_id"],
             version_label=label,
             system_prompt=sys_prompt_val,
             user_prompt_template=user_prompt_val,
@@ -680,6 +683,7 @@ if new_ver_clicked and editing_exp_id:
         new_vid = db.save_prompt_version(new_pv)
         st.session_state["current_experiment_id"] = editing_exp_id
         st.session_state["current_version_id"] = new_vid
+        st.session_state["current_branch_id"] = selected_branch_id
         st.session_state["ws_editing_ver_id"] = new_vid
         st.toast(f"Saved as v{next_num}: {label}.", icon=":material/add_circle:")
         st.rerun()
@@ -709,6 +713,8 @@ if eval_clicked:
             st.session_state["current_version_id"] = ver_id
             st.session_state["ws_editing_exp_id"] = exp_id
             st.session_state["ws_editing_ver_id"] = ver_id
+            st.session_state["current_branch_id"] = db.get_prompt_branches(exp_id)[0]["id"]
+            st.session_state.pop(f"ws_branch_selector_{exp_id}", None)
             st.switch_page("views/2_Evaluation_Lab.py")
     else:
         st.switch_page("views/2_Evaluation_Lab.py")

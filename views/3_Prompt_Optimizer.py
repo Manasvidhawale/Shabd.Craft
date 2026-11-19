@@ -20,6 +20,7 @@ import streamlit as st
 
 from src.config import settings
 from src.evaluation_engine import aggregate_results, evaluate_batch
+from src.experiment_service import create_revision_branch
 from src.optimizer import generate_candidates, recommend_best, run_iterative_optimization
 from src.schemas import (
     CriterionScore,
@@ -42,7 +43,7 @@ from src.ui_theme import status_badge
 
 db = get_database()
 
-render_page_header("Prompt Optimizer", "Generate improved prompt candidates, benchmark them, and promote winners.")
+render_page_header("Improve a prompt", "Create and test alternatives, then save the ones you want to keep.")
 
 # ── Select Experiment & Version ─────────────────────────────────────────
 experiments = db.list_experiments()
@@ -229,9 +230,15 @@ if opt_mode == "Autonomous Multi-Generation Hill-Climbing (Iterative)":
                 if delta > 0:
                     if st.button(":material/star: Promote Winner as New Version", type="primary", key="btn_save_evolved"):
                         next_n = db.get_next_version_number(sel_exp)
+                        branch_id, branch_name = create_revision_branch(
+                            db, sel_exp, sel_ver, f"optimized-v{next_n}",
+                            "Prompt optimizer result",
+                        )
                         evolved_ver = PromptVersion(
                             experiment_id=sel_exp,
+                            branch_id=branch_id,
                             version_number=next_n,
+                            parent_version_id=sel_ver,
                             version_label=f"Evolved ({best_v.optimization_strategy})",
                             system_prompt=best_v.system_prompt,
                             user_prompt_template=best_v.user_prompt_template,
@@ -246,7 +253,8 @@ if opt_mode == "Autonomous Multi-Generation Hill-Climbing (Iterative)":
                         )
                         new_id = db.save_prompt_version(evolved_ver)
                         st.session_state["current_version_id"] = new_id
-                        st.toast(f"Promoted to version v{next_n}.", icon=":material/check_circle:")
+                        st.session_state["current_branch_id"] = branch_id
+                        st.toast(f"Saved v{next_n} on '{branch_name}'.", icon=":material/check_circle:")
                         st.rerun()
 
 else:
@@ -337,9 +345,15 @@ if existing_candidates:
                             st.error("No test cases available.")
                         else:
                             next_num = db.get_next_version_number(sel_exp)
+                            branch_id, _branch_name = create_revision_branch(
+                                db, sel_exp, sel_ver, f"candidate-v{next_num}",
+                                "Prompt optimizer candidate",
+                            )
                             cand_version = PromptVersion(
                                 experiment_id=sel_exp,
+                                branch_id=branch_id,
                                 version_number=next_num,
+                                parent_version_id=sel_ver,
                                 version_label=cand["candidate_label"],
                                 system_prompt=cand["system_prompt"],
                                 user_prompt_template=cand["user_prompt_template"],

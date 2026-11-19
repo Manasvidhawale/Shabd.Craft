@@ -27,6 +27,17 @@ def compare_versions(
 
     Both should have been evaluated on the same test cases.
     """
+    run_ids_a = {r.get("evaluation_run_id") for r in results_a if r.get("evaluation_run_id")}
+    run_ids_b = {r.get("evaluation_run_id") for r in results_b if r.get("evaluation_run_id")}
+    if len(run_ids_a) > 1 or len(run_ids_b) > 1:
+        raise ValueError("Compare one evaluation run per version; multiple runs cannot be blended.")
+    ids_a = {r.get("test_case_id") for r in results_a if r.get("test_case_id")}
+    ids_b = {r.get("test_case_id") for r in results_b if r.get("test_case_id")}
+    if ids_a and ids_b:
+        common_ids = ids_a & ids_b
+        results_a = [r for r in results_a if r.get("test_case_id") in common_ids]
+        results_b = [r for r in results_b if r.get("test_case_id") in common_ids]
+
     # Calculate aggregate scores
     scores_a = _aggregate_criterion_scores(results_a)
     scores_b = _aggregate_criterion_scores(results_b)

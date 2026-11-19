@@ -39,9 +39,10 @@ Prompt engineering is widely practiced but rarely systematic. Most practitioners
 | **Evaluation Lab** | Multi-worker background coordinator thread, Stop/Cancel support, rubric evaluator & adversarial security audit |
 | **Prompt Optimizer** | Autonomous generational hill-climbing mutations & 1-shot candidate generation with benchmark tracking |
 | **Version Comparison** | Inline word-level HTML diff, side-by-side outputs, and Multi-Model Arena with position-swap AI referee |
+| **Prompt Branches** | Named branches from any saved version, with independent revision history and branch heads |
 | **Runtime Harness** | Self-repairing contract enforcement with reflection loops and CI/CD quality gate CLI |
 | **Guardrails** | Input/output PII redaction, prompt injection neutralization, and system prompt leakage filters |
-| **Experiment History** | SQLite-backed persistent experiment lineage, duplication, and bulk JSON/CSV exports |
+| **Experiment History** | SQLite-backed immutable prompt revisions, parent lineage, evaluation run records, duplication, and bulk JSON/CSV exports |
 | **Prompt Library** | 9 built-in starter templates + user custom template repository |
 | **Universal Connectivity** | Native support for OpenAI models, Groq endpoints, custom base URLs, or offline simulated demo mode |
 
@@ -68,7 +69,7 @@ Prompt engineering is widely practiced but rarely systematic. Most practitioners
 ```
 ┌─────────────────────────────────────────────────────┐
 │                   Streamlit UI                       │
-│  app.py (Navigation Shell) + views/ (8 views)       │
+│  app.py (Navigation Shell) + views/ (9 views)       │
 └────────────────────┬────────────────────────────────┘
                      │
          ┌───────────▼───────────┐
@@ -128,7 +129,8 @@ Shabd.Craft/
 │   ├── 4_Compare_Versions.py       # Inline diff & side-by-side comparison
 │   ├── 5_Experiment_History.py     # Persistent history
 │   ├── 6_Prompt_Library.py         # Template library
-│   └── 7_Settings.py               # Configuration
+│   ├── 7_Settings.py               # Configuration
+│   └── 8_Branches.py               # Named prompt branches and history
 │
 ├── src/
 │   ├── config.py                   # Settings, Groq detection & environment
@@ -277,22 +279,22 @@ py -m pytest tests/test_evaluation.py -v
 python -m src.harness --experiment "My Experiment" --min-score 75 --min-security 80
 ```
 
-**Test coverage (177 tests passing):**
+**Test coverage (193 tests passing):**
 
 | Test File | Tests | Covers |
 |---|---|---|
 | `test_prompt_engine.py` | 25 | Template engine, 7 prompting techniques, variables & Groq detection |
 | `test_evaluation.py` | 22 | Multi-criteria weights, scoring, rule-based checks, position bias & verbosity |
 | `test_schemas.py` | 36 | All Pydantic data schemas, enums, validators and serialization |
-| `test_database.py` | 20 | All SQLite CRUD operations, version deletion & dependencies cleanup |
+| `test_database.py` | 32 | SQLite CRUD, prompt branches, immutable history, run snapshots, and dependencies |
 | `test_optimizer.py` | 17 | Autonomous generational hill-climbing mutations & recommendations |
 | `test_guardrails.py` | 14 | Input/output PII redaction, prompt injection & system leak filters |
 | `test_harness.py` | 13 | Input sanitization, auto-repair retry reflection, quality gate & CLI |
-| `test_ui_smoke.py` | 10 | Streamlit AppTest across all 8 views + app.py entrypoint + Python 3.11 AST validation |
+| `test_ui_smoke.py` | 11 | Streamlit AppTest across all 9 views + app.py entrypoint + Python 3.11 AST validation |
 | `test_security_evaluator.py` | 9 | Multi-vector prompt injection attacks, static posture & hardening |
-| `test_comparison_engine.py` | 4 | Version comparison, HTML word-level diffing & arena battles |
+| `test_comparison_engine.py` | 6 | Paired-run comparisons, HTML word-level diffing & arena battles |
 | `test_synthesizer.py` | 4 | Multi-column CSV variable packing and test case synthesis |
-| `test_export_service.py` | 3 | Production SDK code generation (OpenAI Python, LangChain, cURL) |
+| `test_export_service.py` | 4 | Evaluation provenance exports and production SDK code generation |
 
 All tests run **without network access or API keys** (LLM calls are mocked).
 
@@ -344,15 +346,7 @@ See [`docs/evaluation_methodology.md`](docs/evaluation_methodology.md) for full 
 
 ## 🚀 Supported Models
 
-| Model | Input Cost (per 1K tokens) | Output Cost |
-|---|---|---|
-| gpt-3.5-turbo | $0.0005 | $0.0015 |
-| gpt-4 | $0.030 | $0.060 |
-| gpt-4-turbo | $0.010 | $0.030 |
-| gpt-4o | $0.005 | $0.015 |
-| gpt-4o-mini | $0.000150 | $0.000600 |
-
-*Pricing is approximate and for estimation purposes only.*
+The Settings page is the source of truth for the current model catalog and approximate pricing. The default catalog includes OpenAI GPT models, Groq-hosted Llama and Mixtral models, OpenAI-compatible GPT-OSS models, and Qwen. Compatible endpoints can expose additional models through configuration.
 
 ---
 
@@ -360,7 +354,7 @@ See [`docs/evaluation_methodology.md`](docs/evaluation_methodology.md) for full 
 
 1. **Single-user architecture** — Local embedded persistence without multi-tenant authentication.
 2. **Provider Scope** — Native live execution supports OpenAI models, Groq API, and compatible OpenAI-spec endpoints (Ollama, vLLM, LiteLLM). Anthropic and Gemini require proxy routing or export code.
-3. **LLM Judge Variance** — Evaluation scores can naturally vary between runs due to model non-determinism (mitigated via temperature=0 and position-swap bias detection).
+3. **LLM Judge Variance** — Evaluation scores can naturally vary between runs due to model non-determinism (judge temperature is 0.1; position-swap checks are used in the model arena).
 4. **Demo Mode Simulation** — Offline demo scores are deterministic approximations for evaluation without live API keys.
 
 ---
@@ -369,11 +363,11 @@ See [`docs/evaluation_methodology.md`](docs/evaluation_methodology.md) for full 
 
 1. **Multi-agent orchestration** via LangGraph (see `docs/future_agentic_extension.md`)
 2. **Multi-provider support** — Anthropic Claude, Google Gemini, Mistral
-3. **Async batch evaluation** — Non-blocking parallel test case execution
+3. **Evaluation queue and resume support** — Durable scheduling and restartable long-running batches
 4. **User authentication** — Multi-user support with isolated workspaces
 5. **Automated A/B testing** — Statistical significance testing for prompt comparisons
 6. **Semantic similarity scoring** — Using embedding models for relevance evaluation
-7. **Prompt versioning diffs** — Visual word-level diff between prompt versions
+7. **Prompt branch merging** — Compare branches and resolve changes into a new revision.
 8. **CI/CD integration** — Programmatic evaluation via REST API
 
 ---

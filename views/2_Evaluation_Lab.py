@@ -22,6 +22,7 @@ import plotly.graph_objects as go
 import streamlit as st
 
 from src.config import settings
+from src.experiment_service import create_revision_branch
 from src.evaluation_engine import (
     aggregate_results,
     calculate_weighted_score,
@@ -63,16 +64,17 @@ from src.ui_theme import status_badge
 
 db = get_database()
 
-render_page_header("Evaluation Lab", "Benchmark prompts against test suites, inspect telemetry, and audit security resistance.")
+render_page_header("Test prompts", "Run prompts on sample inputs and review their results.")
 
 
 # ── Concurrency Run Handle & Coordinator Thread ─────────────────────────
 class EvalRunHandle:
     """Thread-safe state handle for background evaluation runs."""
-    def __init__(self, experiment_id: str, version_id: str, total: int):
+    def __init__(self, experiment_id: str, version_id: str, total: int, run_id: str):
         self.experiment_id = experiment_id
         self.version_id = version_id
         self.total = total
+        self.run_id = run_id
         self.completed = 0
         self.results: list[EvaluationResult] = []
         self.errors: list[str] = []
@@ -102,7 +104,7 @@ def _eval_coordinator_thread(
         if handle.stop_event.is_set():
             return None
         try:
-            return evaluate_single(
+            result = evaluate_single(
                 version=version,
                 test_case=tc,
                 experiment_id=handle.experiment_id,
@@ -112,11 +114,16 @@ def _eval_coordinator_thread(
                 max_words=max_words,
                 judge_model=judge_model,
             )
+            result.evaluation_run_id = handle.run_id
+            return result
         except Exception as e:
             return EvaluationResult(
                 test_case_id=tc.id,
                 prompt_version_id=version.id,
                 experiment_id=handle.experiment_id,
+                evaluation_run_id=handle.run_id,
+                input_data_snapshot=tc.input_data,
+                expected_output_snapshot=tc.expected_output,
                 execution_status=ExecutionStatus.FAILED,
                 error_message=str(e),
                 created_at=_now(),
@@ -214,7 +221,10 @@ def render_live_eval_monitor():
 
         if stat in ("done", "stopped"):
             # Main thread persists bulk results and clears handle safely
+            for result in handle.results:
+                result.evaluation_run_id = handle.run_id
             db.save_evaluation_results_bulk(handle.results)
+            db.update_evaluation_run_status(handle.run_id, stat)
             db.update_experiment_status(handle.experiment_id, ExecutionStatus.SUCCESS.value)
             st.session_state.pop("eval_run_handle", None)
             st.toast(f"Evaluation {stat}: {res_count} results saved to database.", icon=":material/check_circle:")
@@ -445,7 +455,38 @@ with tab_config:
 
 # ── Tab 3: Results & Telemetry ─────────────────────────────────────────
 with tab_results:
-    existing_results = db.get_evaluation_results(selected_exp_id, selected_ver_id)
+    all_version_results = db.get_evaluation_results(selected_exp_id, selected_ver_id)
+    evaluation_runs = db.get_evaluation_runs(selected_exp_id, selected_ver_id)
+    legacy_results = [r for r in all_version_results if not r.get("evaluation_run_id")]
+    run_options = [run["id"] for run in evaluation_runs]
+    if legacy_results:
+        run_options.append("__legacy__")
+
+    if run_options:
+        run_by_id = {run["id"]: run for run in evaluation_runs}
+        def _evaluation_run_label(run_id):
+            if run_id == "__legacy__":
+                return "Older results (run settings unavailable)"
+            run = run_by_id[run_id]
+            return f"{run['status'].title()} · {run['method']} · {run['created_at'][:19]}"
+
+        selected_run_id = st.selectbox(
+            "Evaluation run", run_options,
+            format_func=_evaluation_run_label,
+            key=f"eval_results_run_{selected_ver_id}",
+        )
+        if selected_run_id == "__legacy__":
+            existing_results = legacy_results
+            selected_run_records = []
+            st.warning("These results predate saved evaluation run context. They remain available for review, but are excluded from version comparisons.")
+        else:
+            existing_results = db.get_evaluation_results(selected_exp_id, evaluation_run_id=selected_run_id)
+            selected_run_records = [run_by_id[selected_run_id]]
+            run_config = json.loads(selected_run_records[0].get("config", "{}"))
+            st.caption(f"Settings: {selected_run_records[0]['method']} · {run_config.get('provider', 'unknown')} · {run_config.get('generation_model', 'default model')}")
+    else:
+        existing_results = []
+        selected_run_records = []
 
     if existing_results:
         st.markdown("##### Summary Scorecard")
@@ -534,7 +575,7 @@ with tab_results:
             tc = tc_map.get(r["test_case_id"], {})
             scores = {s["name"]: s["score"] for s in json.loads(r.get("criterion_scores", "[]"))}
             rows.append({
-                "Input": tc.get("input_data", "")[:80],
+                "Input": (r.get("input_data_snapshot") or tc.get("input_data", ""))[:80],
                 "Output": r.get("generated_output", "")[:80],
                 "Score": float(r["overall_score"]),
                 "Status": r["execution_status"],
@@ -557,7 +598,10 @@ with tab_results:
         # Export Controls
         exp_data = db.get_experiment(selected_exp_id) or {}
         csv_data = export_results_csv(existing_results, db.get_test_cases(selected_exp_id))
-        json_data = export_results_json(exp_data, versions, db.get_test_cases(selected_exp_id), existing_results)
+        json_data = export_results_json(
+            exp_data, versions, db.get_test_cases(selected_exp_id), existing_results,
+            selected_run_records,
+        )
 
         ex1, ex2 = st.columns(2)
         with ex1:
@@ -571,10 +615,11 @@ with tab_results:
             tc = tc_map.get(r["test_case_id"], {})
             with st.expander(f"TC-{i+1}: Score {r['overall_score']:.1f}% — {r['execution_status']}"):
                 st.markdown("**Input:**")
-                st.code(tc.get("input_data", ""), language="text")
-                if tc.get("expected_output"):
+                st.code(r.get("input_data_snapshot") or tc.get("input_data", ""), language="text")
+                expected_snapshot = r.get("expected_output_snapshot") or tc.get("expected_output", "")
+                if expected_snapshot:
                     st.markdown("**Expected:**")
-                    st.code(tc["expected_output"], language="text")
+                    st.code(expected_snapshot, language="text")
                 st.markdown("**Generated Output:**")
                 st.code(r.get("generated_output", ""), language="text")
     else:
@@ -657,9 +702,15 @@ with tab_security:
 
             if st.button(":material/add_circle: Save Hardened Copy as New Version", key=f"save_hard_{selected_ver_id}"):
                 next_num = db.get_next_version_number(selected_exp_id)
+                branch_id, branch_name = create_revision_branch(
+                    db, selected_exp_id, selected_ver_id, f"hardened-v{next_num}",
+                    "Prompt hardening experiment",
+                )
                 hardened_ver = PromptVersion(
                     experiment_id=selected_exp_id,
+                    branch_id=branch_id,
                     version_number=next_num,
+                    parent_version_id=selected_ver_id,
                     version_label=f"{sec_version.version_label} (Hardened)",
                     system_prompt=hard_sys,
                     user_prompt_template=hard_user,
@@ -674,7 +725,8 @@ with tab_security:
                 )
                 new_ver_id = db.save_prompt_version(hardened_ver)
                 st.session_state["current_version_id"] = new_ver_id
-                st.toast(f"Saved hardened version v{next_num}.", icon=":material/check_circle:")
+                st.session_state["current_branch_id"] = branch_id
+                st.toast(f"Saved v{next_num} on '{branch_name}'.", icon=":material/check_circle:")
                 st.rerun()
 
 # ── Action Bar: Dispatch Background Coordinator Thread ────────────────
@@ -721,7 +773,7 @@ else:
             )
 
             tc_objects = [
-                TestCase(id=tc["id"], input_data=tc["input_data"], expected_output=tc.get("expected_output", ""))
+                TestCase(id=tc["id"], input_data=tc["input_data"], expected_output=tc.get("expected_output", ""), metadata=json.loads(tc.get("metadata", "{}")) if isinstance(tc.get("metadata"), str) else tc.get("metadata", {}))
                 for tc in test_cases
             ]
 
@@ -734,7 +786,26 @@ else:
             )
 
             # Spawn coordinator background thread
-            new_handle = EvalRunHandle(selected_exp_id, selected_ver_id, len(tc_objects))
+            run_config = {
+                "provider": settings.active_provider,
+                "provider_base_url": "https://api.groq.com/openai/v1" if settings.is_groq else (settings.openai_base_url or "https://api.openai.com/v1"),
+                "generation_model": version_obj.model_name or settings.active_model,
+                "generation_temperature": version_obj.temperature,
+                "generation_max_tokens": version_obj.max_tokens,
+                "judge_model": judge_model,
+                "required_keywords": keywords or [],
+                "max_words": max_words,
+                "max_workers": 4,
+            }
+            run_id = db.create_evaluation_run(
+                experiment_id=selected_exp_id,
+                prompt_version_id=selected_ver_id,
+                method=EvaluationMethod(method).value,
+                weights=weights_obj.model_dump(),
+                config=run_config,
+                test_cases=[tc.model_dump() for tc in tc_objects],
+            )
+            new_handle = EvalRunHandle(selected_exp_id, selected_ver_id, len(tc_objects), run_id)
             st.session_state["eval_run_handle"] = new_handle
 
             coord_thread = threading.Thread(

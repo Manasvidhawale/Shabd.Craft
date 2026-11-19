@@ -104,7 +104,9 @@ class PromptVersion(BaseModel):
 
     id: str = Field(default_factory=_new_id)
     experiment_id: str
+    branch_id: Optional[str] = None
     version_number: int = 1
+    parent_version_id: Optional[str] = None
     version_label: str = "Original"
     system_prompt: str = ""
     user_prompt_template: str
@@ -118,6 +120,19 @@ class PromptVersion(BaseModel):
     is_optimized: bool = False
     optimization_strategy: str = ""
     created_at: str = Field(default_factory=_now)
+
+
+class PromptBranch(BaseModel):
+    """A named pointer to the current prompt revision in an experiment."""
+
+    id: str = Field(default_factory=_new_id)
+    experiment_id: str
+    name: str
+    head_version_id: str
+    base_version_id: str
+    description: str = ""
+    created_at: str = Field(default_factory=_now)
+    updated_at: str = Field(default_factory=_now)
 
 
 # ── Test Case Schemas ──────────────────────────────────────────────────
@@ -214,6 +229,9 @@ class EvaluationResult(BaseModel):
     test_case_id: str
     prompt_version_id: str
     experiment_id: str
+    evaluation_run_id: Optional[str] = None
+    input_data_snapshot: str = ""
+    expected_output_snapshot: str = ""
     generated_output: str = ""
     criterion_scores: list[CriterionScore] = Field(default_factory=list)
     overall_score: float = Field(default=0.0, ge=0, le=100)
