@@ -43,7 +43,7 @@ from src.ui_theme import status_badge
 
 db = get_database()
 
-render_page_header("Compare Versions", "Inspect word-level prompt changes, metric deltas, and cross-model battle arenas.")
+render_page_header("Compare versions", "See what changed between prompt versions and how their results differ.")
 
 # ── Select Experiment ──────────────────────────────────────────────────
 experiments = db.list_experiments()

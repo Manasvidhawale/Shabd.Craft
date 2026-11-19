@@ -27,7 +27,7 @@ from src.ui_theme import status_badge
 
 db = get_database()
 
-render_page_header("Experiment History", "Manage, inspect, duplicate, export, and delete saved prompt experiments.")
+render_page_header("History", "Browse saved prompts and their versions.")
 
 # ── Delete Confirmation Dialog ──────────────────────────────────────────
 @st.dialog("Delete Experiment")

@@ -34,7 +34,7 @@ from src.ui_theme import status_badge
 
 db = get_database()
 
-render_page_header("Prompt Library", "Browse starter catalogs, manage custom templates, and launch workshops.")
+render_page_header("Templates", "Start with a ready-made prompt or manage your own templates.")
 
 
 # ── Delete Template Dialog ─────────────────────────────────────────────

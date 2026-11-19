@@ -31,7 +31,7 @@ from src.ui_theme import mask_api_key, status_badge
 db = get_database()
 apply_user_settings_to_runtime()
 
-render_page_header("Settings", "Manage your API connection, default model, evaluation preferences, and workspace data.")
+render_page_header("Settings", "Set your API key, default model, test preferences, and data options.")
 
 
 # ── Dialog for Destructive Clear ─────────────────────────────────────────

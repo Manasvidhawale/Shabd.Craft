@@ -14,7 +14,7 @@ import streamlit as st
 from src.ui_helpers import get_database, load_version_into_workshop, render_empty_experiment_state, render_page_header
 
 db = get_database()
-render_page_header("Prompt Branches", "Explore different prompt ideas while keeping each version safe.")
+render_page_header("Branches", "Try different prompt ideas without changing the main line of work.")
 
 
 @st.dialog("Remove branch")

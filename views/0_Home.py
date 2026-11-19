@@ -27,7 +27,7 @@ from src.ui_theme import status_badge
 
 db = get_database()
 
-render_page_header("Workspace Overview", "Create prompts, run evaluations, and review experiment performance.")
+render_page_header("Your workspace", "Write prompts, test changes, and follow their history.")
 
 with st.container(border=True):
     qa1, qa2, qa3, qa4 = st.columns(4)
@@ -45,10 +45,10 @@ with st.container(border=True):
             clear_workshop_widgets()
             st.switch_page("views/1_Prompt_Workshop.py")
     with qa2:
-        if st.button(":material/menu_book: Prompt Library", use_container_width=True):
+        if st.button(":material/menu_book: Templates", use_container_width=True):
             st.switch_page("views/6_Prompt_Library.py")
     with qa3:
-        if st.button(":material/biotech: Evaluation Lab", use_container_width=True):
+        if st.button(":material/biotech: Test prompts", use_container_width=True):
             st.switch_page("views/2_Evaluation_Lab.py")
     with qa4:
         if st.button(":material/settings: Settings", use_container_width=True):
@@ -59,14 +59,14 @@ st.markdown("")
 # ── Workspace Metrics (3 Columns x 2 Rows) ─────────────────────────────
 metrics = db.get_dashboard_metrics()
 
-st.markdown("##### Workspace Summary")
+st.markdown("##### At a glance")
 m1, m2, m3 = st.columns(3)
 with m1:
     with st.container(border=True):
-        st.metric("Active Prompts", metrics["total_experiments"])
+        st.metric("Prompts", metrics["total_experiments"])
 with m2:
     with st.container(border=True):
-        st.metric("Prompt Versions", metrics["total_versions"])
+        st.metric("Versions", metrics["total_versions"])
 with m3:
     with st.container(border=True):
         st.metric("Test Runs", metrics["total_test_cases"])
@@ -74,19 +74,19 @@ with m3:
 m4, m5, m6 = st.columns(3)
 with m4:
     with st.container(border=True):
-        st.metric("Average Quality", f"{metrics['avg_score']:.1f}%" if metrics["avg_score"] else "—")
+        st.metric("Average score", f"{metrics['avg_score']:.1f}%" if metrics["avg_score"] else "—")
 with m5:
     with st.container(border=True):
-        st.metric("AI Optimizations", metrics["optimization_count"])
+        st.metric("Improvements", metrics["optimization_count"])
 with m6:
     with st.container(border=True):
         best_name = metrics["best_prompt"]
-        st.metric("Top Benchmark", (best_name[:18] + "…") if len(best_name) > 18 else (best_name or "—"))
+        st.metric("Highest-scoring prompt", (best_name[:18] + "…") if len(best_name) > 18 else (best_name or "—"))
 
 st.markdown("")
 
 if metrics["total_experiments"] > 0:
-    st.markdown("##### Active Prompts")
+    st.markdown("##### Recent prompts")
     recent = db.get_recent_experiments(limit=6)
     for exp in recent:
         versions = db.get_prompt_versions(exp["id"])
