@@ -39,6 +39,7 @@ Prompt engineering is widely practiced but rarely systematic. Most practitioners
 | **Evaluation Lab** | Multi-worker background coordinator thread, Stop/Cancel support, rubric evaluator & adversarial security audit |
 | **Prompt Optimizer** | Autonomous generational hill-climbing mutations & 1-shot candidate generation with benchmark tracking |
 | **Version Comparison** | Inline word-level HTML diff, side-by-side outputs, and Multi-Model Arena with position-swap AI referee |
+| **Prompt Branches** | Named branches from any saved version, with independent revision history and branch heads |
 | **Runtime Harness** | Self-repairing contract enforcement with reflection loops and CI/CD quality gate CLI |
 | **Guardrails** | Input/output PII redaction, prompt injection neutralization, and system prompt leakage filters |
 | **Experiment History** | SQLite-backed immutable prompt revisions, parent lineage, evaluation run records, duplication, and bulk JSON/CSV exports |
@@ -68,7 +69,7 @@ Prompt engineering is widely practiced but rarely systematic. Most practitioners
 ```
 ┌─────────────────────────────────────────────────────┐
 │                   Streamlit UI                       │
-│  app.py (Navigation Shell) + views/ (8 views)       │
+│  app.py (Navigation Shell) + views/ (9 views)       │
 └────────────────────┬────────────────────────────────┘
                      │
          ┌───────────▼───────────┐
@@ -128,7 +129,8 @@ Shabd.Craft/
 │   ├── 4_Compare_Versions.py       # Inline diff & side-by-side comparison
 │   ├── 5_Experiment_History.py     # Persistent history
 │   ├── 6_Prompt_Library.py         # Template library
-│   └── 7_Settings.py               # Configuration
+│   ├── 7_Settings.py               # Configuration
+│   └── 8_Branches.py               # Named prompt branches and history
 │
 ├── src/
 │   ├── config.py                   # Settings, Groq detection & environment
@@ -277,18 +279,18 @@ py -m pytest tests/test_evaluation.py -v
 python -m src.harness --experiment "My Experiment" --min-score 75 --min-security 80
 ```
 
-**Test coverage (186 tests passing):**
+**Test coverage (193 tests passing):**
 
 | Test File | Tests | Covers |
 |---|---|---|
 | `test_prompt_engine.py` | 25 | Template engine, 7 prompting techniques, variables & Groq detection |
 | `test_evaluation.py` | 22 | Multi-criteria weights, scoring, rule-based checks, position bias & verbosity |
 | `test_schemas.py` | 36 | All Pydantic data schemas, enums, validators and serialization |
-| `test_database.py` | 26 | SQLite CRUD, immutable prompt history, run snapshots, and dependencies |
+| `test_database.py` | 32 | SQLite CRUD, prompt branches, immutable history, run snapshots, and dependencies |
 | `test_optimizer.py` | 17 | Autonomous generational hill-climbing mutations & recommendations |
 | `test_guardrails.py` | 14 | Input/output PII redaction, prompt injection & system leak filters |
 | `test_harness.py` | 13 | Input sanitization, auto-repair retry reflection, quality gate & CLI |
-| `test_ui_smoke.py` | 10 | Streamlit AppTest across all 8 views + app.py entrypoint + Python 3.11 AST validation |
+| `test_ui_smoke.py` | 11 | Streamlit AppTest across all 9 views + app.py entrypoint + Python 3.11 AST validation |
 | `test_security_evaluator.py` | 9 | Multi-vector prompt injection attacks, static posture & hardening |
 | `test_comparison_engine.py` | 6 | Paired-run comparisons, HTML word-level diffing & arena battles |
 | `test_synthesizer.py` | 4 | Multi-column CSV variable packing and test case synthesis |
@@ -365,7 +367,7 @@ The Settings page is the source of truth for the current model catalog and appro
 4. **User authentication** — Multi-user support with isolated workspaces
 5. **Automated A/B testing** — Statistical significance testing for prompt comparisons
 6. **Semantic similarity scoring** — Using embedding models for relevance evaluation
-7. **Prompt branching and merge workflows** — Revision lineage is recorded; branch merging is not implemented.
+7. **Prompt branch merging** — Compare branches and resolve changes into a new revision.
 8. **CI/CD integration** — Programmatic evaluation via REST API
 
 ---

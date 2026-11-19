@@ -55,6 +55,12 @@ def test_experiment_history_renders_without_errors():
     assert not at.exception
 
 
+def test_branches_page_renders_without_errors():
+    at = AppTest.from_file(str(_ROOT / "views" / "8_Branches.py"), default_timeout=15)
+    at.run()
+    assert not at.exception
+
+
 def test_prompt_library_renders_without_errors():
     at = AppTest.from_file(str(_ROOT / "views" / "6_Prompt_Library.py"), default_timeout=15)
     at.run()

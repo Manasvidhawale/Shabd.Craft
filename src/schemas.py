@@ -104,6 +104,7 @@ class PromptVersion(BaseModel):
 
     id: str = Field(default_factory=_new_id)
     experiment_id: str
+    branch_id: Optional[str] = None
     version_number: int = 1
     parent_version_id: Optional[str] = None
     version_label: str = "Original"
@@ -119,6 +120,19 @@ class PromptVersion(BaseModel):
     is_optimized: bool = False
     optimization_strategy: str = ""
     created_at: str = Field(default_factory=_now)
+
+
+class PromptBranch(BaseModel):
+    """A named pointer to the current prompt revision in an experiment."""
+
+    id: str = Field(default_factory=_new_id)
+    experiment_id: str
+    name: str
+    head_version_id: str
+    base_version_id: str
+    description: str = ""
+    created_at: str = Field(default_factory=_now)
+    updated_at: str = Field(default_factory=_now)
 
 
 # ── Test Case Schemas ──────────────────────────────────────────────────

@@ -15,6 +15,7 @@ Shabd.Craft is designed with strict separation of concerns between the UI, busin
 │  views/1_Prompt_Workshop    views/5_Experiment_History  │
 │  views/2_Evaluation_Lab     views/6_Prompt_Library      │
 │  views/3_Prompt_Optimizer   views/7_Settings            │
+│                             views/8_Branches            │
 │                                                         │
 │  Technology: Streamlit + Plotly + Custom CSS            │
 └────────────────────────┬────────────────────────────────┘
@@ -133,11 +134,16 @@ experiments
   id, name, category, description, status, created_at, updated_at
 
 prompt_versions
-  id, experiment_id→, version_number, parent_version_id, version_label,
+  id, experiment_id→, branch_id, version_number, parent_version_id,
+  version_label,
   system_prompt, user_prompt_template, technique,
   few_shot_examples (JSON), output_format, variables (JSON),
   model_name, temperature, max_tokens, is_optimized,
   optimization_strategy, created_at
+
+prompt_branches
+  id, experiment_id→, name, head_version_id→, base_version_id→,
+  description, created_at, updated_at
 
 evaluation_runs
   id, experiment_id→, prompt_version_id→, method, weights,
