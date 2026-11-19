@@ -15,6 +15,7 @@ if str(_ROOT) not in sys.path:
     sys.path.insert(0, str(_ROOT))
 
 import json
+from contextvars import copy_context
 from concurrent.futures import ThreadPoolExecutor
 import pandas as pd
 import plotly.graph_objects as go
@@ -154,8 +155,8 @@ if compare_mode == "Multi-Model Arena (Model Battle)":
                 status_box.write(f"Querying Model A ({model_a})...")
                 status_box.write(f"Querying Model B ({model_b})...")
                 with ThreadPoolExecutor(max_workers=2) as arena_exec:
-                    fut_a = arena_exec.submit(execute_prompt, ver_a_obj, arena_input)
-                    fut_b = arena_exec.submit(execute_prompt, ver_b_obj, arena_input)
+                    fut_a = arena_exec.submit(copy_context().run, execute_prompt, ver_a_obj, arena_input)
+                    fut_b = arena_exec.submit(copy_context().run, execute_prompt, ver_b_obj, arena_input)
                     resp_a = fut_a.result()
                     resp_b = fut_b.result()
                 status_box.update(label=":material/check_circle: Battle complete", state="complete")

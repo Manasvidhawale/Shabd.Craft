@@ -16,12 +16,13 @@ if str(_ROOT) not in sys.path:
 
 import json
 import threading
+from contextvars import copy_context
 from concurrent.futures import ThreadPoolExecutor, as_completed
 import pandas as pd
 import plotly.graph_objects as go
 import streamlit as st
 
-from src.config import settings
+from src.config import settings, snapshot_current_settings, use_settings
 from src.experiment_service import create_revision_branch
 from src.evaluation_engine import (
     aggregate_results,
@@ -83,7 +84,7 @@ class EvalRunHandle:
         self.stop_event = threading.Event()
 
 
-def _eval_coordinator_thread(
+def _eval_coordinator_body(
     handle: EvalRunHandle,
     version: PromptVersion,
     test_cases: list[TestCase],
@@ -130,7 +131,10 @@ def _eval_coordinator_thread(
             )
 
     with ThreadPoolExecutor(max_workers=num_workers) as executor:
-        futures = {executor.submit(_worker, tc): tc for tc in test_cases}
+        futures = {
+            executor.submit(copy_context().run, _worker, tc): tc
+            for tc in test_cases
+        }
         for future in as_completed(futures):
             if handle.stop_event.is_set():
                 break
@@ -147,6 +151,28 @@ def _eval_coordinator_thread(
 
     with handle.lock:
         handle.status = "stopped" if handle.stop_event.is_set() else "done"
+
+
+def _eval_coordinator_thread(
+    handle: EvalRunHandle,
+    version: PromptVersion,
+    test_cases: list[TestCase],
+    weights: EvaluationWeights,
+    method: EvaluationMethod,
+    keywords: list[str] | None,
+    max_words: int | None,
+    judge_model: str | None,
+    max_workers: int = 4,
+    runtime_settings=None,
+):
+    """Run evaluation with the initiating session's captured configuration."""
+    if runtime_settings is None:
+        runtime_settings = snapshot_current_settings()
+    with use_settings(runtime_settings):
+        _eval_coordinator_body(
+            handle, version, test_cases, weights, method, keywords,
+            max_words, judge_model, max_workers,
+        )
 
 
 # ── Select Experiment & Version ─────────────────────────────────────────
@@ -820,6 +846,7 @@ else:
                     max_words,
                     judge_model,
                     4,  # max_workers
+                    snapshot_current_settings(),
                 ),
                 daemon=True,
             )

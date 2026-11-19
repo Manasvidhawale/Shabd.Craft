@@ -18,22 +18,23 @@ from src.config import settings
 # Persistent connection pool for HTTP keep-alives and low-latency reuse
 _SHARED_HTTP_CLIENT = httpx.Client(
     limits=httpx.Limits(max_keepalive_connections=20, max_connections=50),
-    timeout=httpx.Timeout(settings.timeout),
+    # The SDK applies the current Settings.timeout to each client/request.
+    # Keep the shared transport neutral so a timeout change takes effect
+    # immediately instead of being captured when this module is imported.
+    timeout=None,
 )
-_CLIENT_CACHE: dict[tuple[str, str | None], any] = {}
 
 
 def _get_openai_client(api_key: str, base_url: str | None):
-    cache_key = (api_key, base_url)
-    if cache_key not in _CLIENT_CACHE:
-        import openai
-        _CLIENT_CACHE[cache_key] = openai.OpenAI(
-            api_key=api_key,
-            base_url=base_url,
-            timeout=settings.timeout,
-            http_client=_SHARED_HTTP_CLIENT,
-        )
-    return _CLIENT_CACHE[cache_key]
+    """Build a client from the active runtime settings without retaining keys."""
+    import openai
+
+    return openai.OpenAI(
+        api_key=api_key,
+        base_url=base_url,
+        timeout=settings.timeout,
+        http_client=_SHARED_HTTP_CLIENT,
+    )
 
 
 class OpenAIProvider(BaseLLMProvider):

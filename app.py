@@ -17,7 +17,7 @@ if str(_ROOT) not in sys.path:
 
 import streamlit as st
 from src.config import settings
-from src.ui_helpers import get_database, apply_user_settings_to_runtime
+from src.ui_helpers import apply_user_settings_to_runtime
 from src.ui_theme import inject_custom_fonts
 
 _ASSETS_DIR = _ROOT / "assets"
@@ -64,7 +64,6 @@ def init_session_state() -> None:
 
 init_session_state()
 apply_user_settings_to_runtime()
-get_database()
 
 # ── 4. Brand Logo & Structured Navigation ──────────────────────────────
 if (_ASSETS_DIR / "logo.svg").exists() and (_ASSETS_DIR / "icon.svg").exists():
