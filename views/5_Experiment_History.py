@@ -116,9 +116,16 @@ for exp in filtered:
                     f" · from v{parent['version_number']}" if parent
                     else (" · parent revision deleted" if v.get("parent_version_id") else " · root revision")
                 )
+                parent_2 = version_by_id.get(v.get("parent_2_version_id"))
+                merge_tag = ""
+                if v.get("parent_2_version_id"):
+                    if parent_2:
+                        merge_tag = f" · :material/call_merge: :violet[Merged with v{parent_2['version_number']}]"
+                    else:
+                        merge_tag = " · :material/call_merge: :violet[Merged revision]"
                 vc1, vc2, vc3 = st.columns([4, 1, 1])
                 with vc1:
-                    st.markdown(f"**v{v['version_number']}:** {v['version_label']}{parent_tag}{opt_tag}")
+                    st.markdown(f"**v{v['version_number']}:** {v['version_label']}{parent_tag}{merge_tag}{opt_tag}")
                 with vc2:
                     if st.button(":material/edit_note: Open", key=f"hist_open_v_{v['id']}", use_container_width=True):
                         load_version_into_workshop(db, exp, v)

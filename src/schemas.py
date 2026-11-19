@@ -107,6 +107,8 @@ class PromptVersion(BaseModel):
     branch_id: Optional[str] = None
     version_number: int = 1
     parent_version_id: Optional[str] = None
+    parent_2_version_id: Optional[str] = None
+    merge_metadata: Optional[dict[str, Any]] = None
     version_label: str = "Original"
     system_prompt: str = ""
     user_prompt_template: str
