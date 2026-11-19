@@ -17,7 +17,8 @@ from typing import Any, Optional
 from src.schemas import (
     Experiment, PromptVersion, PromptBranch, TestCase, EvaluationResult,
     PromptTemplate, OptimizationCandidate, ExecutionStatus,
-    TaskCategory, _new_id, _now,
+    TaskCategory, PromptingTechnique, OutputFormat, FewShotExample,
+    _new_id, _now,
 )
 
 
@@ -64,6 +65,8 @@ class Database:
                     branch_id TEXT,
                     version_number INTEGER DEFAULT 1,
                     parent_version_id TEXT,
+                    parent_2_version_id TEXT,
+                    merge_metadata TEXT DEFAULT '',
                     version_label TEXT DEFAULT 'Original',
                     system_prompt TEXT DEFAULT '',
                     user_prompt_template TEXT NOT NULL,
@@ -199,6 +202,8 @@ class Database:
             for table, column, definition in (
                 ("prompt_versions", "branch_id", "TEXT"),
                 ("prompt_versions", "parent_version_id", "TEXT"),
+                ("prompt_versions", "parent_2_version_id", "TEXT"),
+                ("prompt_versions", "merge_metadata", "TEXT DEFAULT ''"),
                 ("evaluation_results", "evaluation_run_id", "TEXT"),
                 ("evaluation_results", "input_data_snapshot", "TEXT DEFAULT ''"),
                 ("evaluation_results", "expected_output_snapshot", "TEXT DEFAULT ''"),
@@ -366,6 +371,318 @@ class Database:
             conn.execute("UPDATE prompt_versions SET branch_id = NULL WHERE branch_id = ?", (branch_id,))
             conn.execute("DELETE FROM prompt_branches WHERE id = ?", (branch_id,))
 
+    # ── Branch Merging & Lineage Ancestry ─────────────────────────────
+
+    def find_lowest_common_ancestor(
+        self, experiment_id: str, ver_a_id: str, ver_b_id: str
+    ) -> Optional[dict]:
+        """
+        Find the lowest common ancestor (LCA) between two revisions in an experiment.
+        Traverses DAG edges through both parent_version_id and parent_2_version_id.
+        Returns the ancestor PromptVersion dict, or None if no common ancestor exists.
+        """
+        with self._connect() as conn:
+            all_versions = {
+                row["id"]: dict(row)
+                for row in conn.execute(
+                    "SELECT * FROM prompt_versions WHERE experiment_id = ?", (experiment_id,)
+                ).fetchall()
+            }
+
+        if ver_a_id not in all_versions or ver_b_id not in all_versions:
+            return None
+
+        if ver_a_id == ver_b_id:
+            return all_versions[ver_a_id]
+
+        def get_ancestors_with_depth(start_id: str) -> dict[str, int]:
+            visited: dict[str, int] = {}
+            queue = [(start_id, 0)]
+            while queue:
+                curr_id, depth = queue.pop(0)
+                if curr_id in visited and visited[curr_id] <= depth:
+                    continue
+                visited[curr_id] = depth
+                node = all_versions.get(curr_id)
+                if not node:
+                    continue
+                p1 = node.get("parent_version_id")
+                if p1 and p1 in all_versions:
+                    queue.append((p1, depth + 1))
+                p2 = node.get("parent_2_version_id")
+                if p2 and p2 in all_versions:
+                    queue.append((p2, depth + 1))
+            return visited
+
+        anc_a = get_ancestors_with_depth(ver_a_id)
+        anc_b = get_ancestors_with_depth(ver_b_id)
+
+        common_ids = set(anc_a.keys()) & set(anc_b.keys())
+        if not common_ids:
+            return None
+
+        # Return lowest common ancestor (highest version_number, closest to both branch tips)
+        best_id = max(
+            common_ids,
+            key=lambda cid: (all_versions[cid]["version_number"], -(anc_a[cid] + anc_b[cid])),
+        )
+        return all_versions[best_id]
+
+    def compute_three_way_merge(
+        self, ancestor: dict, dest_version: dict, source_version: dict
+    ) -> dict:
+        """
+        Compute a 3-way merge between destination and source relative to ancestor.
+        Inspects all prompt fields, determines automatic resolutions, and flags conflicts.
+        """
+        fields_to_check = [
+            "system_prompt",
+            "user_prompt_template",
+            "technique",
+            "output_format",
+            "model_name",
+            "temperature",
+            "max_tokens",
+            "few_shot_examples",
+        ]
+
+        result_fields: dict[str, dict] = {}
+        conflicts: list[str] = []
+        auto_merged: list[str] = []
+        unchanged: list[str] = []
+
+        for field in fields_to_check:
+            a_val = ancestor.get(field)
+            d_val = dest_version.get(field)
+            s_val = source_version.get(field)
+
+            # Normalize few_shot_examples if stored as JSON string
+            if field == "few_shot_examples":
+                if isinstance(a_val, str):
+                    try:
+                        a_val = json.loads(a_val)
+                    except Exception:
+                        a_val = []
+                if isinstance(d_val, str):
+                    try:
+                        d_val = json.loads(d_val)
+                    except Exception:
+                        d_val = []
+                if isinstance(s_val, str):
+                    try:
+                        s_val = json.loads(s_val)
+                    except Exception:
+                        s_val = []
+
+            # Compare values
+            d_changed = (d_val != a_val)
+            s_changed = (s_val != a_val)
+
+            if not d_changed and not s_changed:
+                status = "unchanged"
+                proposed = d_val
+                is_conflict = False
+                unchanged.append(field)
+            elif not d_changed and s_changed:
+                status = "auto_source"
+                proposed = s_val
+                is_conflict = False
+                auto_merged.append(field)
+            elif d_changed and not s_changed:
+                status = "auto_dest"
+                proposed = d_val
+                is_conflict = False
+                auto_merged.append(field)
+            elif d_val == s_val:
+                status = "auto_same"
+                proposed = d_val
+                is_conflict = False
+                auto_merged.append(field)
+            else:
+                status = "conflict"
+                proposed = d_val  # Default to destination value
+                is_conflict = True
+                conflicts.append(field)
+
+            result_fields[field] = {
+                "field": field,
+                "ancestor": a_val,
+                "destination": d_val,
+                "source": s_val,
+                "proposed": proposed,
+                "status": status,
+                "is_conflict": is_conflict,
+            }
+
+        return {
+            "has_conflicts": len(conflicts) > 0,
+            "conflicts": conflicts,
+            "auto_merged": auto_merged,
+            "unchanged": unchanged,
+            "fields": result_fields,
+            "ancestor_version_id": ancestor.get("id"),
+            "dest_version_id": dest_version.get("id"),
+            "source_version_id": source_version.get("id"),
+        }
+
+    def execute_fast_forward_merge(
+        self,
+        experiment_id: str,
+        dest_branch_id: str,
+        source_branch_id: str,
+        expected_dest_head_id: str | None = None,
+        expected_source_head_id: str | None = None,
+    ) -> dict:
+        """
+        Advance dest_branch head directly to source_branch head when dest is an ancestor of source.
+        Guarantees fast-forward safety.
+        """
+        with self._connect() as conn:
+            dest_branch = conn.execute(
+                "SELECT * FROM prompt_branches WHERE id = ?", (dest_branch_id,)
+            ).fetchone()
+            src_branch = conn.execute(
+                "SELECT * FROM prompt_branches WHERE id = ?", (source_branch_id,)
+            ).fetchone()
+            if not dest_branch or not src_branch:
+                raise ValueError("Both destination and source branches must exist.")
+            if dest_branch["experiment_id"] != experiment_id or src_branch["experiment_id"] != experiment_id:
+                raise ValueError("Both branches must belong to this experiment.")
+            if dest_branch["id"] == src_branch["id"]:
+                raise ValueError("Cannot merge a branch into itself.")
+
+            dest_head_id = dest_branch["head_version_id"]
+            src_head_id = src_branch["head_version_id"]
+            if expected_dest_head_id and dest_head_id != expected_dest_head_id:
+                raise ValueError("Destination branch has been updated since preview. Please refresh and review the merge again.")
+            if expected_source_head_id and src_head_id != expected_source_head_id:
+                raise ValueError("Source branch has been updated since preview. Please refresh and review the merge again.")
+            if dest_head_id == src_head_id:
+                raise ValueError("Branches are already pointing to the same revision.")
+
+            ancestor = self.find_lowest_common_ancestor(experiment_id, dest_head_id, src_head_id)
+            if not ancestor or ancestor["id"] != dest_head_id:
+                raise ValueError("Fast-forward merge not possible: destination branch has diverged.")
+
+            now = _now()
+            conn.execute(
+                "UPDATE prompt_branches SET head_version_id = ?, updated_at = ? WHERE id = ?",
+                (src_head_id, now, dest_branch_id),
+            )
+            src_version = conn.execute(
+                "SELECT * FROM prompt_versions WHERE id = ?", (src_head_id,)
+            ).fetchone()
+            return {
+                "version_id": src_head_id,
+                "version_number": src_version["version_number"],
+                "is_fast_forward": True,
+            }
+
+    def execute_branch_merge(
+        self,
+        experiment_id: str,
+        dest_branch_id: str,
+        source_branch_id: str,
+        resolved_fields: dict,
+        custom_label: str = "",
+        expected_dest_head_id: str | None = None,
+        expected_source_head_id: str | None = None,
+    ) -> dict:
+        """
+        Create an immutable merge version combining dest and source branches,
+        recording both parents and merge metadata, and advancing destination branch head.
+        """
+        with self._connect() as conn:
+            dest_branch = conn.execute(
+                "SELECT * FROM prompt_branches WHERE id = ?", (dest_branch_id,)
+            ).fetchone()
+            src_branch = conn.execute(
+                "SELECT * FROM prompt_branches WHERE id = ?", (source_branch_id,)
+            ).fetchone()
+            if not dest_branch or not src_branch:
+                raise ValueError("Both destination and source branches must exist.")
+            if dest_branch["experiment_id"] != experiment_id or src_branch["experiment_id"] != experiment_id:
+                raise ValueError("Both branches must belong to this experiment.")
+            if dest_branch["id"] == src_branch["id"]:
+                raise ValueError("Cannot merge a branch into itself.")
+
+            dest_head_id = dest_branch["head_version_id"]
+            src_head_id = src_branch["head_version_id"]
+            if expected_dest_head_id and dest_head_id != expected_dest_head_id:
+                raise ValueError("Destination branch has been updated since preview. Please refresh and review the merge again.")
+            if expected_source_head_id and src_head_id != expected_source_head_id:
+                raise ValueError("Source branch has been updated since preview. Please refresh and review the merge again.")
+            if dest_head_id == src_head_id:
+                raise ValueError("Branches are already pointing to the same revision.")
+
+            ancestor = self.find_lowest_common_ancestor(experiment_id, dest_head_id, src_head_id)
+            if not ancestor:
+                raise ValueError(
+                    f"Branches '{dest_branch['name']}' and '{src_branch['name']}' do not share a common history and cannot be merged."
+                )
+
+            dest_head = conn.execute("SELECT * FROM prompt_versions WHERE id = ?", (dest_head_id,)).fetchone()
+            src_head = conn.execute("SELECT * FROM prompt_versions WHERE id = ?", (src_head_id,)).fetchone()
+
+            raw_fs = resolved_fields.get("few_shot_examples", dest_head["few_shot_examples"])
+            few_shots: list[FewShotExample] = []
+            if isinstance(raw_fs, str):
+                try:
+                    raw_fs = json.loads(raw_fs)
+                except Exception:
+                    raw_fs = []
+            if isinstance(raw_fs, list):
+                for item in raw_fs:
+                    if isinstance(item, dict):
+                        few_shots.append(FewShotExample(**item))
+                    elif isinstance(item, FewShotExample):
+                        few_shots.append(item)
+
+            next_num = self.get_next_version_number(experiment_id)
+            default_label = f"Merge branch '{src_branch['name']}' into '{dest_branch['name']}'"
+            version_label = custom_label.strip() if custom_label.strip() else default_label
+
+            merge_meta = {
+                "source_branch_id": src_branch["id"],
+                "source_branch_name": src_branch["name"],
+                "source_head_version_id": src_head_id,
+                "source_version_number": src_head["version_number"],
+                "destination_branch_id": dest_branch["id"],
+                "destination_branch_name": dest_branch["name"],
+                "destination_head_version_id": dest_head_id,
+                "destination_version_number": dest_head["version_number"],
+                "ancestor_version_id": ancestor["id"],
+                "ancestor_version_number": ancestor["version_number"],
+                "merged_at": _now(),
+                "is_fast_forward": False,
+            }
+
+            merged_pv = PromptVersion(
+                id=_new_id(),
+                experiment_id=experiment_id,
+                branch_id=dest_branch["id"],
+                version_number=next_num,
+                parent_version_id=dest_head_id,
+                parent_2_version_id=src_head_id,
+                merge_metadata=merge_meta,
+                version_label=version_label,
+                system_prompt=resolved_fields.get("system_prompt", dest_head["system_prompt"]),
+                user_prompt_template=resolved_fields.get("user_prompt_template", dest_head["user_prompt_template"]),
+                technique=PromptingTechnique(resolved_fields.get("technique", dest_head["technique"])),
+                output_format=OutputFormat(resolved_fields.get("output_format", dest_head["output_format"])),
+                few_shot_examples=few_shots,
+                model_name=resolved_fields.get("model_name", dest_head["model_name"]),
+                temperature=float(resolved_fields.get("temperature", dest_head["temperature"])),
+                max_tokens=int(resolved_fields.get("max_tokens", dest_head["max_tokens"])),
+            )
+
+        self.save_prompt_version(merged_pv)
+        return {
+            "version_id": merged_pv.id,
+            "version_number": merged_pv.version_number,
+            "is_fast_forward": False,
+        }
+
     # ── Prompt Versions ────────────────────────────────────────────────
 
     def save_prompt_version(self, pv: PromptVersion) -> str:
@@ -378,6 +695,13 @@ class Database:
                 ).fetchone()
                 if not parent_row or parent_row["experiment_id"] != pv.experiment_id:
                     raise ValueError("A revision parent must be an existing version in the same experiment.")
+            if pv.parent_2_version_id:
+                parent_2_row = conn.execute(
+                    "SELECT experiment_id FROM prompt_versions WHERE id = ?",
+                    (pv.parent_2_version_id,),
+                ).fetchone()
+                if not parent_2_row or parent_2_row["experiment_id"] != pv.experiment_id:
+                    raise ValueError("A second revision parent must be an existing version in the same experiment.")
             branch = None
             new_main_branch = False
             if pv.branch_id:
@@ -416,13 +740,15 @@ class Database:
                 raise ValueError(f"Version number {pv.version_number} already exists in this experiment.")
             conn.execute(
                 "INSERT INTO prompt_versions "
-                "(id, experiment_id, branch_id, version_number, parent_version_id, version_label, system_prompt, "
-                "user_prompt_template, technique, few_shot_examples, output_format, "
-                "variables, model_name, temperature, max_tokens, is_optimized, "
-                "optimization_strategy, created_at) "
-                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-                (pv.id, pv.experiment_id, pv.branch_id, pv.version_number, pv.parent_version_id, pv.version_label,
-                 pv.system_prompt, pv.user_prompt_template, pv.technique.value,
+                "(id, experiment_id, branch_id, version_number, parent_version_id, parent_2_version_id, "
+                "merge_metadata, version_label, system_prompt, user_prompt_template, technique, "
+                "few_shot_examples, output_format, variables, model_name, temperature, max_tokens, "
+                "is_optimized, optimization_strategy, created_at) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                (pv.id, pv.experiment_id, pv.branch_id, pv.version_number, pv.parent_version_id,
+                 pv.parent_2_version_id,
+                 json.dumps(pv.merge_metadata) if isinstance(pv.merge_metadata, dict) else (pv.merge_metadata or ""),
+                 pv.version_label, pv.system_prompt, pv.user_prompt_template, pv.technique.value,
                  json.dumps([e.model_dump() for e in pv.few_shot_examples]),
                  pv.output_format.value, json.dumps(pv.variables),
                  pv.model_name, pv.temperature, pv.max_tokens,
@@ -467,13 +793,16 @@ class Database:
             for row in versions:
                 conn.execute(
                     "INSERT INTO prompt_versions "
-                    "(id, experiment_id, branch_id, version_number, parent_version_id, version_label, system_prompt, "
-                    "user_prompt_template, technique, few_shot_examples, output_format, variables, model_name, "
+                    "(id, experiment_id, branch_id, version_number, parent_version_id, parent_2_version_id, "
+                    "merge_metadata, version_label, system_prompt, user_prompt_template, technique, "
+                    "few_shot_examples, output_format, variables, model_name, "
                     "temperature, max_tokens, is_optimized, optimization_strategy, created_at) "
-                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                     (version_ids[row["id"]], target_experiment_id,
                      branch_ids.get(row["branch_id"]), row["version_number"],
-                     version_ids.get(row["parent_version_id"]), row["version_label"],
+                     version_ids.get(row["parent_version_id"]),
+                     version_ids.get(row["parent_2_version_id"]) if row["parent_2_version_id"] else None,
+                     row["merge_metadata"] or "", row["version_label"],
                      row["system_prompt"], row["user_prompt_template"], row["technique"],
                      row["few_shot_examples"], row["output_format"], row["variables"],
                      row["model_name"], row["temperature"], row["max_tokens"],
@@ -513,7 +842,8 @@ class Database:
             if not version:
                 return
             child = conn.execute(
-                "SELECT 1 FROM prompt_versions WHERE parent_version_id = ? LIMIT 1", (version_id,)
+                "SELECT 1 FROM prompt_versions WHERE parent_version_id = ? OR parent_2_version_id = ? LIMIT 1",
+                (version_id, version_id),
             ).fetchone()
             if child:
                 raise ValueError("This revision has child revisions and cannot be deleted.")
